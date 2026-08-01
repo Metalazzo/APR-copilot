@@ -1,0 +1,67 @@
+## Agressions environnementales
+1. Temperature extreme haute (>45C)
+2. Temperature extreme basse (<-25C)
+3. Variation rapide de temperature (choc thermique)
+4. Humidite elevee / condensation
+5. Pluie battante / infiltration d'eau
+6. Neige / givre / accumulation de glace
+7. Vent violent (>120 km/h)
+8. Foudre (impact direct ou indirect)
+9. Rayonnement solaire UV
+10. Atmosphere saline (corrosion)
+11. Atmosphere industrielle (pollution, depots conducteurs)
+12. Poussiere / sable (abrasion, obstruction)
+13. Inondation
+14. Incendie externe (vegetation, riverains)
+15. Seisme
+16. Vibration (passage trains)
+17. Chocs mecaniques (chute d'objets, véhicules)
+
+## Agressions electriques
+18. Surtension (manoeuvre, foudre, regime transitoire)
+19. Sous-tension / coupure d'alimentation
+20. Court-circuit (interne ou sur le reseau alimente)
+21. Surcharge prolongee
+22. Desequilibre de phases
+23. Decharge electrostatique (ESD)
+24. Perturbation electromagnetique conduite
+25. Perturbation electromagnetique rayonnee
+26. Defaut d'isolement (vieillissement, pollution, humidite)
+27. Arc electrique / flash-over
+28. Defaut a la terre
+29. Courant harmonique excessif
+30. Perte du reseau de terre
+
+## Agressions mecaniques
+31. Usure / fatigue mecanique
+32. Rupture / fissuration
+33. Grippage / blocage mecanisme
+34. Corrosion sous contrainte
+35. Desserrement / perte de fixation
+36. Erosion des contacts electriques
+37. Fatigue thermomecanique (dilatation differentielle)
+38. Vandalisme / acte de malveillance
+
+## Agressions thermiques
+39. Echauffement anormal (defaut, surcharge)
+40. Point chaud (mauvais contact, effet joule)
+41. Incendie interne (arc, huile, isolant)
+42. Defaillance du systeme de refroidissement
+43. Emballements thermique batterie
+
+## Agressions liees aux interfaces / SCADA
+44. Perte de communication SCADA
+45. Ordre intempestif (erreur operateur ou defaut liaison)
+46. Defaut de synchronisation temporelle
+47. Attaque cyber / intrusion sur le reseau de teleconduite
+48. Perte de l'alimentation auxiliaire BT
+
+## Agressions humaines et organisationnelles
+49. Erreur de manipulation (operateur local ou distant)
+50. Maintenance inadequate (procedure non respectee, outillage inadapte)
+51. Oubli de reconstitution apres maintenance
+52. Intervention sous tension non autorisee
+53. Non-respect des consignes de securite
+54. Defaut de formation / perte de competence
+55. Defaut de planification de la maintenance
+56. Absence de piece de rechange (obsolescence)

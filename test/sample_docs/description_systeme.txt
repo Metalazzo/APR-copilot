@@ -1,0 +1,47 @@
+Systeme : Sous-station electrique de traction ferroviaire
+Perimetre : Alimentation, transformation, distribution 25kV AC pour alimentation des catenaires
+Phases de vie : Exploitation normale, Maintenance preventive/curative, Arret d'urgence, Remise en service
+Fonctions principales :
+  - Alimenter la catenaire en 25kV AC monophase
+  - Transformer la tension 63kV/90kV en 25kV
+  - Proteger contre les surcharges et courts-circuits (disjoncteurs, protections differentielles)
+  - Permettre l'isolement de sections de catenaire pour maintenance (sectionneurs)
+  - Surveiller les parametres electriques (tension, courant, puissance, desequilibre)
+  - Communiquer avec le poste de commande centralise (SCADA)
+  - Assurer la mise a la terre de securite
+Interfaces :
+  - Reseau electrique national (63kV ou 90kV triphase) via poste de livraison RTE/ENEDIS
+  - Catenaires (25kV AC monophase) - depart lignes
+  - Systeme de teleconduite SCADA - protocole IEC 60870-5-104
+  - Voie ferree et installations de quai (proximite, mise a la terre)
+  - Reseau de terre general
+  - Alimentations auxiliaires (BT 230/400V)
+  - Systeme de detection incendie
+Utilisateurs :
+  - Agents de conduite (exploitation normale, teleconduite)
+  - Mainteneurs habilites electriques (HTA/HTB)
+  - Agents d'astreinte (interventions depannees)
+Environnement :
+  - Exterieur non climatise
+  - Temperature : -20C a +45C (extremes -25C a +50C)
+  - Humidite relative : 5% a 100% (condensation possible)
+  - Pluie, neige, givre, vent violent
+  - Atmosphere saline (zones cotieres) ou industrielle (pollution)
+  - Vibrations et chocs (passage trains a proximite)
+  - Risque foudre (zone exposee, niveau keraunique eleve selon region)
+Hypotheses structurantes :
+  - La sous-station est concue selon les normes EN 50122, EN 50124, EN 50126, EN 50128, EN 50129
+  - Le niveau de redondance est N+1 pour les transformateurs de puissance
+  - Les operateurs sont formes et habilites
+  - Le plan de maintenance preventive est applique conformement au manuel d'exploitation
+  - La teleconduite SCADA permet le controle a distance de toutes les fonctions essentielles
+Contraintes :
+  - Disponibilite cible du systeme : 99.95%
+  - Duree maximale d'indisponibilite non planifiee : 4h
+  - Securite des personnes : priorite absolue (courants de defaut > 10kA)
+Template d'analyse attendu :
+  Colonnes : ID | Fonction | Phase de vie | Agression/Menace | Situation dangereuse | Evenement redoute | Causes | Consequences | Barrieres existantes | Barrieres recommandees | Gravite | Vraisemblance | Niveau de risque | Justification | Confiance | Points a valider
+Matrice de cotation (si fournie) :
+  Gravite : G1 (mineure) a G4 (catastrophique - perte de vie)
+  Vraisemblance : F1 (tres improbable) a F4 (frequent)
+  Niveau de risque : Faible (G1-2 + F1-2) / Moyen / Eleve / Inacceptable (G4 + F3-4)

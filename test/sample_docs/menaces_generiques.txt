@@ -1,0 +1,45 @@
+## Menaces generiques
+
+### Defaillances fonctionnelles
+1. Perte totale de fonction
+2. Perte partielle de fonction (degradation)
+3. Fonction intempestive (fonctionnement non souhaite)
+4. Fonction hors sequence (mauvais ordre chronologique)
+5. Derive fonctionnelle (fonction dans les temps mais hors tolerance)
+6. Blocage en position de securite (fail-safe)
+7. Blocage en position non securitaire
+
+### Erreurs humaines
+8. Erreur d'interpretation des informations
+9. Erreur d'execution d'une procedure
+10. Omission d'une etape
+11. Action non autorisee
+12. Mauvaise appreciation de la situation
+13. Communication inadequate entre equipes
+
+### Defauts de configuration / parametrage
+14. Configuration incorrecte des protections
+15. Parametrage errone des seuils d'alarme
+16. Erreur de version logicielle
+17. Mauvaise gestion des habilitations / droits d'acces
+
+### Defauts d'interface
+18. Incompatibilite de protocole de communication
+19. Defaut de connecteur / liaison
+20. Diaphonie / interference entre signaux
+21. Erreur de correspondance impedance
+22. Defaut de synchronisation entre equipements
+
+### Degradation progressive
+23. Vieillissement / obsolescence des composants
+24. Fatigue mecanique progressive
+25. Corrosion progressive
+26. Derive des caracteristiques electriques
+27. Encrassement / accumulation progressive
+28. Perte progressive d'etancheite
+
+### Agressions externes
+29. Acte de malveillance / sabotage
+30. Intrusion physique dans l'enceinte
+31. Cyberattaque sur le SCADA
+32. Vol de materiel / cuivre
