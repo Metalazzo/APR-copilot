@@ -31,11 +31,26 @@ pip install -r requirements.txt
 
 Variables d'environnement (ou modifier `config.py`) :
 
+**Modèle cloud (agents complexes) :**
+
 | Variable | Defaut | Description |
 |----------|--------|-------------|
-| `MISTRAL_MODEL` | `mistral-large` | Nom du modele |
-| `MISTRAL_BASE_URL` | `http://localhost:8080/v1` | URL de l'API Mistral |
-| `MISTRAL_API_KEY` | `not-needed` | Cle API (souvent inutile en local) |
+| `CLOUD_MODEL` | `deepseek-v4-flash` | Modele cloud pour Ingenieur, Qualite, Client |
+| `CLOUD_BASE_URL` | `https://api.deepseek.com/v1` | URL de l'API |
+| `CLOUD_API_KEY` | (requis) | Cle API |
+
+**Modèle local (formatage) :**
+
+| Variable | Defaut | Description |
+|----------|--------|-------------|
+| `LOCAL_MODEL` | `gemma-4-12b-qat` | Modele local pour le Secretaire |
+| `LOCAL_BASE_URL` | `http://localhost:1234/v1` | URL LM Studio |
+| `LOCAL_API_KEY` | `not-needed` | Cle API |
+
+**RAG :**
+
+| Variable | Defaut | Description |
+|----------|--------|-------------|
 | `CHROMA_PERSIST_DIR` | `./chroma_db` | Repertoire du vector store |
 | `EMBEDDING_MODEL` | `intfloat/multilingual-e5-large` | Modele d'embeddings |
 

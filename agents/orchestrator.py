@@ -214,14 +214,12 @@ class RiskAnalysisOrchestrator:
 
     def __init__(
         self,
-        model_client: OpenAIChatCompletionClient,
         engineer: AssistantAgent,
         quality: AssistantAgent,
         client: AssistantAgent,
         secretary: AssistantAgent,
         human_callback: Optional[Callable[..., Awaitable[str]]] = None,
     ):
-        self.model_client = model_client
         self.engineer = engineer
         self.quality = quality
         self.client_agent = client
@@ -348,11 +346,28 @@ class RiskAnalysisOrchestrator:
         return all_outputs
 
 
-def create_model_client() -> OpenAIChatCompletionClient:
+def create_model_client(profile_name: str = "default") -> OpenAIChatCompletionClient:
+    profiles = app_config.profiles
+    if profile_name == "default":
+        profile_name = profiles.default
+
+    profile_map = {
+        "cloud": profiles.cloud,
+        "local": profiles.local,
+    }
+    profile = profile_map.get(profile_name, profiles.cloud)
+
     return OpenAIChatCompletionClient(
-        model=app_config.llm.model,
-        base_url=app_config.llm.base_url,
-        api_key=app_config.llm.api_key,
-        temperature=app_config.llm.temperature,
-        max_tokens=app_config.llm.max_tokens,
+        model=profile.model,
+        base_url=profile.base_url,
+        api_key=profile.api_key,
+        temperature=profile.temperature,
+        max_tokens=profile.max_tokens,
     )
+
+
+def create_model_clients() -> dict[str, OpenAIChatCompletionClient]:
+    return {
+        "cloud": create_model_client("cloud"),
+        "local": create_model_client("local"),
+    }

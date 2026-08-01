@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.0] - 2026-08-01
+
+### Ajout
+- Support multi-modèles avec profils nommés (cloud / local)
+- Associe un modèle cloud (DeepSeek V4 Flash) aux agents complexes (Ingénieur, Qualité, Client)
+- Associe un modèle local (Gemma 4 12B QAT via LM Studio) au Secretary (formatage)
+- Fonctions `create_model_client(profile_name)` et `create_model_clients()` dans l'orchestrateur
+
+### Changement
+- `config.py` : remplacement de `LLMConfig` unique par `ModelProfiles` avec deux profils configurables via env vars
+- `agents/orchestrator.py` : `RiskAnalysisOrchestrator` ne prend plus de `model_client` en paramètre (chaque agent a son propre client)
+- `main.py` : les agents sont créés avec le client adapté à leur profil de complexité
+- Variables d'environnement renommées : `MISTRAL_*` → `CLOUD_*` / `LOCAL_*`
+
 ## [1.0.0] - 2026-08-01
 
 ### Ajout

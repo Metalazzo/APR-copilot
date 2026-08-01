@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from agents.agents import EngineerAgent, QualityAgent, ClientAgent, SecretaryAgent
-from agents.orchestrator import RiskAnalysisOrchestrator, create_model_client
+from agents.orchestrator import RiskAnalysisOrchestrator, create_model_client, create_model_clients
 from rag.vector_store import ingest_documents
 from rag.retriever import invalidate_bm25_cache
 from config import config as app_config
@@ -66,17 +66,19 @@ async def analyze_command(args):
             return
 
     print_banner()
-    print(f"Modele : {app_config.llm.model}")
-    print(f"Endpoint : {app_config.llm.base_url}")
+    print(f"Modele cloud (complex) : {app_config.profiles.cloud.model}")
+    print(f"Modele local (formatage) : {app_config.profiles.local.model}")
     print(f"Projet : {args.project}")
     print()
 
-    model_client = create_model_client()
+    clients = create_model_clients()
+    cloud_client = clients["cloud"]
+    local_client = clients["local"]
 
-    engineer_wrapper = EngineerAgent(model_client)
-    quality_wrapper = QualityAgent(model_client)
-    client_wrapper = ClientAgent(model_client)
-    secretary_wrapper = SecretaryAgent(model_client)
+    engineer_wrapper = EngineerAgent(cloud_client)
+    quality_wrapper = QualityAgent(cloud_client)
+    client_wrapper = ClientAgent(cloud_client)
+    secretary_wrapper = SecretaryAgent(local_client)
 
     async def interactive_checkpoint(step_id: str, production: str, review: str, all_outputs: dict) -> str:
         print(f"\n--- Production ({step_id}) ---")
@@ -89,7 +91,6 @@ async def analyze_command(args):
         return response
 
     orchestrator = RiskAnalysisOrchestrator(
-        model_client=model_client,
         engineer=engineer_wrapper.agent,
         quality=quality_wrapper.agent,
         client=client_wrapper.agent,
