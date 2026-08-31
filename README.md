@@ -175,6 +175,10 @@ Le workflow :
 5. **Livraison** → Secretaire → Document final
 
 A chaque point de controle, le systeme attend votre validation (CONTINUER / QUITTER / feedback).
+Un **feedback declenche une re-generation, puis une nouvelle relecture et un nouveau
+point de controle sur la meme etape** : vous pouvez iterer autant de fois que necessaire.
+Chaque tour repart d'une memoire d'agent purgee, avec la production precedente et tous
+vos feedbacks injectes en tete de tache (les relecteurs sont informes de vos demandes).
 
 ### 4. Format des sorties
 

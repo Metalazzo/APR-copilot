@@ -1,4 +1,5 @@
 import hashlib
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -145,6 +146,52 @@ def ingest_documents(directory: Path, reset: bool = False) -> IngestReport:
     return report
 
 
+_PAGE_NUMBER_RE = re.compile(r"^\s*(page|p\.?)\s*[:.]?\s*\d+\s*(/|of|sur)?\s*\d*\s*$", re.IGNORECASE)
+
+
+def _line_key(ln: str) -> str:
+    """Cle de comparaison d'une ligne insensible aux chiffres, espaces et casse.
+
+    Les extractions PDF varient legèrement d'une page a l'autre (mots coupes,
+    numeros de page dans la ligne) : on compare la version alpha-only tronquee.
+    """
+    return re.sub(r"[^a-z]", "", ln.lower())[:80]
+
+
+def _clean_pdf_text(pages: list) -> str:
+    """Nettoie le texte extrait d'un PDF page par page.
+
+    Retire les en-tetes/pieds de page repetes (lignes quasi identiques presentes
+    sur au moins la moitie des pages : references, confidentialite, numerotation)
+    et les numeros de page isoles. Ces lignes polluent les chunks et saturent la
+    recherche hybride avec des fragments sans valeur.
+    """
+    n_pages = len(pages)
+    if n_pages < 3:
+        return "\n".join(pages)
+
+    page_lines = []
+    key_counts = {}
+    for page in pages:
+        lines = [re.sub(r"\s+", " ", ln).strip() for ln in page.splitlines()]
+        lines = [ln for ln in lines if ln]
+        page_lines.append(lines)
+        for key in {_line_key(ln) for ln in lines if len(_line_key(ln)) >= 10}:
+            key_counts[key] = key_counts.get(key, 0) + 1
+
+    threshold = max(2, int(n_pages * 0.5))
+    repeated_keys = {k for k, cnt in key_counts.items() if cnt >= threshold}
+
+    cleaned_pages = []
+    for lines in page_lines:
+        kept = [
+            ln for ln in lines
+            if _line_key(ln) not in repeated_keys and not _PAGE_NUMBER_RE.match(ln)
+        ]
+        cleaned_pages.append("\n".join(kept))
+    return "\n".join(cleaned_pages)
+
+
 def _extract_text(file_path: Path) -> str:
     """Extrait le texte brut d'un document. Peut lever : l'erreur est journalisee
     par l'appelant et le fichier est ignore sans casser l'ingestion."""
@@ -160,7 +207,8 @@ def _extract_text(file_path: Path) -> str:
                 reader.decrypt("")
             except Exception:
                 raise ValueError("PDF chiffre : mot de passe requis")
-        return "\n".join(page.extract_text() or "" for page in reader.pages)
+        pages = [page.extract_text() or "" for page in reader.pages]
+        return _clean_pdf_text(pages)
     elif suffix == ".docx":
         from docx import Document
         doc = Document(str(file_path))
@@ -204,4 +252,21 @@ def _chunk_text(text: str) -> list[str]:
 
     if current.strip():
         chunks.append(current.strip())
-    return chunks
+
+    # Fusion des micro-chunks : les datasheets/PDF produisent beaucoup de petits
+    # paragraphes (125-300 car.) inutilisables pour la recherche hybride.
+    min_chars = min(300, chunk_size)
+    merged: list[str] = []
+    for chunk in chunks:
+        if merged and len(merged[-1]) < min_chars:
+            candidate = (merged[-1] + "\n\n" + chunk).strip()
+            if len(candidate) <= chunk_size + 200:
+                merged[-1] = candidate
+            else:
+                merged.append(chunk)
+        else:
+            merged.append(chunk)
+    if len(merged) >= 2 and len(merged[-1]) < min_chars:
+        merged[-2] = (merged[-2] + "\n\n" + merged[-1]).strip()
+        merged.pop()
+    return merged

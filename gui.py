@@ -124,9 +124,12 @@ async def on_progress(event: dict) -> None:
         card["review_md"].set_content(event["text"] or "*Aucune relecture*")
         log.push(f"[{event.get('reviewer')}] relecture : {len(event.get('text', ''))} caracteres")
     elif etype == "step_retry" and card:
-        card["badge"].set_text("Re-generation…")
+        n = event.get("iteration", 1)
+        card["badge"].set_text(f"Re-generation #{n}…")
         card["badge"].props("color=orange")
-        log.push(f">> Feedback integre : re-generation de {event['step_id']}")
+        log.push(f">> Feedback integre : re-generation #{n} de {event['step_id']}")
+    elif etype == "context_purged":
+        log.push(f"[memoire] contexte purge ({event.get('size_before', '?')} messages)")
     elif etype == "checkpoint_answer":
         log.push(f">> {event['step_id']} : {event['answer'][:80]}")
     elif etype == "done":

@@ -271,7 +271,67 @@ class RiskAnalysisOrchestrator:
             return ""
         return "\n\n".join(parts)
 
-    async def _run_engineer_step(self, step: dict) -> str:
+    def _reviewer_for(self, step: dict) -> Optional[AssistantAgent]:
+        if not step.get("reviewer"):
+            return None
+        return {
+            "quality": self.quality,
+            "client": self.client_agent,
+        }.get(step["reviewer"])
+
+    async def _context_size(self, agent: AssistantAgent) -> int:
+        try:
+            return len(await agent.model_context.get_messages())
+        except Exception:
+            return -1
+
+    async def _clear_context(self, agent: AssistantAgent) -> int:
+        """Vide la memoire interne d'un agent. Retourne sa taille avant purge.
+
+        L'orchestrateur reinjecte deja tout le contexte utile dans chaque tache
+        (etapes precedentes, description, RAG, production a corriger) : la memoire
+        cumulee d'AutoGen (UnboundedChatCompletionContext par defaut) noierait les
+        feedbacks humains dans l'historique et gonflerait le prefill.
+        """
+        size = await self._context_size(agent)
+        try:
+            await agent.model_context.clear()
+        except Exception:
+            pass
+        return size
+
+    async def _purge_step_contexts(self, step: dict) -> None:
+        """Purge la memoire du producteur et du relecteur de l'etape."""
+        producer = self.engineer if step["agent"] == "engineer" else self.secretary
+        for role, agent in (("producteur", producer), ("relecteur", self._reviewer_for(step))):
+            if agent is None:
+                continue
+            size_before = await self._clear_context(agent)
+            if size_before > 0:
+                print(f"[memoire] contexte {role} purge (contenait {size_before} messages)")
+                await self._emit({
+                    "type": "context_purged",
+                    "step_id": step["id"],
+                    "size_before": size_before,
+                })
+
+    @staticmethod
+    def _feedback_section(feedbacks: list) -> str:
+        """Formate l'historique des feedbacks humains de l'etape (tous a respecter)."""
+        if not feedbacks:
+            return ""
+        lines = "\n".join(f"{n}. {f}" for n, f in enumerate(feedbacks, 1))
+        return (
+            f"\n\n## FEEDBACK HUMAIN A INTEGRER (par ordre chronologique, "
+            f"tous a respecter)\n{lines}"
+        )
+
+    async def _run_engineer_step(
+        self,
+        step: dict,
+        previous_production: str = "",
+        human_feedback: str = "",
+    ) -> str:
         description = self.state.analysis_state.system_description
         rag_query = f"Analyse de risque {step['id']}"
         if description:
@@ -292,13 +352,28 @@ class RiskAnalysisOrchestrator:
                 f"## Travaux precedents de l'analyse (a respecter et prolonger)\n"
                 f"{previous}\n\n"
             )
+        if previous_production:
+            enriched_task += (
+                f"## Production precedente de cette etape (A CORRIGER selon le feedback)\n"
+                f"{previous_production[:4000]}\n\n"
+            )
+        if human_feedback:
+            enriched_task += (
+                f"## FEEDBACK HUMAIN A INTEGRER (prioritaire, a suivre a la lettre)\n"
+                f"{human_feedback}\n\n"
+            )
         enriched_task += (
             f"## Tache\n{step['task']}\n\n"
             f"Tu peux aussi utiliser l'outil search_rag pour approfondir tes recherches."
         )
         return await self._ask_agent(self.engineer, enriched_task)
 
-    def _secretary_task(self, step: dict, human_feedback: str = "") -> str:
+    def _secretary_task(
+        self,
+        step: dict,
+        human_feedback: str = "",
+        previous_production: str = "",
+    ) -> str:
         """Constitue la tache du Secretaire : template + travaux precedents a assembler."""
         task = (
             f"{step['task']}\n\n"
@@ -309,8 +384,16 @@ class RiskAnalysisOrchestrator:
             f"n'invente aucun risque, aucune barriere ni aucune donnee qui n'y "
             f"figure pas."
         )
+        if previous_production:
+            task += (
+                f"\n\n## Version precedente du document (A CORRIGER selon le feedback)\n"
+                f"{previous_production[:4000]}"
+            )
         if human_feedback:
-            task += f"\n\n## FEEDBACK HUMAIN A INTEGRER\n{human_feedback}"
+            task += (
+                f"\n\n## FEEDBACK HUMAIN A INTEGRER (prioritaire, a suivre a la lettre)\n"
+                f"{human_feedback}"
+            )
         previous = self._previous_outputs_section(exclude_step_id=step["id"])
         if previous:
             task += (
@@ -319,24 +402,33 @@ class RiskAnalysisOrchestrator:
             )
         return task
 
-    async def _run_reviewer_step(self, step: dict, engineer_output: str) -> str:
+    async def _run_reviewer_step(
+        self,
+        step: dict,
+        engineer_output: str,
+        human_feedback: str = "",
+    ) -> str:
         reviewer_name = step.get("reviewer")
         reviewer_task_template = step.get("reviewer_task", "")
         if not reviewer_name or not reviewer_task_template:
             return ""
 
-        reviewer = {
-            "quality": self.quality,
-            "client": self.client_agent,
-        }.get(reviewer_name)
-        if not reviewer:
+        reviewer = self._reviewer_for(step)
+        if reviewer is None:
             return ""
 
         review_task = (
             f"## Production de l'Ingenieur Technique a relire\n\n"
             f"{engineer_output}\n\n"
-            f"## Consigne de relecture\n{reviewer_task_template}"
         )
+        if human_feedback:
+            review_task += (
+                f"## Contexte humain\n"
+                f"Le jury humain a demande les corrections suivantes : verifie qu'elles "
+                f"sont bien integrees dans la production ci-dessus.\n"
+                f"{human_feedback}\n\n"
+            )
+        review_task += f"## Consigne de relecture\n{reviewer_task_template}"
         return await self._ask_agent(reviewer, review_task)
 
     async def _human_checkpoint(self, step: dict, engineer_output: str, review_output: str) -> str:
@@ -361,45 +453,87 @@ class RiskAnalysisOrchestrator:
                 "agent": step["agent"],
             })
 
-            header = f"\n{'='*70}\n  {step['name']}\n{'='*70}"
-            print(header)
+            print(f"\n{'='*70}\n  {step['name']}\n{'='*70}")
 
             agent_name = step["agent"]
-            if agent_name == "engineer":
-                production = await self._run_engineer_step(step)
-            else:
-                production = await self._ask_agent(
-                    self.secretary, self._secretary_task(step)
-                )
+            feedbacks: list = []
+            iteration = 0
+            production = ""
+            interrupted = False
 
-            all_outputs[step["id"]] = production
-            self.state.outputs[step["id"]] = production
-            await self._emit({
-                "type": "production",
-                "step_id": step["id"],
-                "agent": agent_name,
-                "text": production,
-            })
-            print(f"\n[Production - {agent_name}]")
-            print(production[:1500] + ("..." if len(production) > 1500 else ""))
+            # Boucle de raffinement : production -> relecture -> checkpoint,
+            # repetee tant que l'humain fournit un feedback (jusqu'a CONTINUER
+            # ou QUITTER). Chaque tour repart d'une memoire d'agent purgee et
+            # d'une tache auto-contenue (production precedente + feedbacks).
+            while True:
+                await self._purge_step_contexts(step)
 
-            review_output = ""
-            if step.get("reviewer"):
-                print(f"\n[Relecture - {step['reviewer']}]")
-                review_output = await self._run_reviewer_step(step, production)
-                self.state.reviews[step["id"]] = review_output
+                if iteration == 0:
+                    if agent_name == "engineer":
+                        production = await self._run_engineer_step(step)
+                    else:
+                        production = await self._ask_agent(
+                            self.secretary, self._secretary_task(step)
+                        )
+                else:
+                    await self._emit({
+                        "type": "step_retry",
+                        "step_id": step["id"],
+                        "iteration": iteration,
+                    })
+                    print(f"\n>> Re-generation (iteration {iteration}) avec "
+                          f"{len(feedbacks)} feedback(s) humain(s)...")
+                    if agent_name == "engineer":
+                        production = await self._run_engineer_step(
+                            step,
+                            previous_production=production,
+                            human_feedback=self._feedback_section(feedbacks),
+                        )
+                    else:
+                        production = await self._ask_agent(
+                            self.secretary,
+                            self._secretary_task(
+                                step,
+                                human_feedback=self._feedback_section(feedbacks),
+                                previous_production=production,
+                            ),
+                        )
+
+                all_outputs[step["id"]] = production
+                self.state.outputs[step["id"]] = production
                 await self._emit({
-                    "type": "review",
+                    "type": "production",
                     "step_id": step["id"],
-                    "reviewer": step["reviewer"],
-                    "text": review_output,
+                    "agent": agent_name,
+                    "text": production,
                 })
-                print(review_output[:1500] + ("..." if len(review_output) > 1500 else ""))
+                print(f"\n[Production - {agent_name}] (iteration {iteration})")
+                print(production[:1500] + ("..." if len(production) > 1500 else ""))
 
-            if step["checkpoint"]:
+                review_output = ""
+                if step.get("reviewer"):
+                    print(f"\n[Relecture - {step['reviewer']}]")
+                    review_output = await self._run_reviewer_step(
+                        step,
+                        production,
+                        human_feedback="\n".join(feedbacks),
+                    )
+                    self.state.reviews[step["id"]] = review_output
+                    await self._emit({
+                        "type": "review",
+                        "step_id": step["id"],
+                        "reviewer": step["reviewer"],
+                        "text": review_output,
+                    })
+                    print(review_output[:1500] + ("..." if len(review_output) > 1500 else ""))
+
+                if not step["checkpoint"]:
+                    break  # etape finale (livraison) : pas de checkpoint humain
+
                 await self._emit({"type": "checkpoint", "step_id": step["id"]})
+                suffix = f" (iteration {iteration})" if iteration else ""
                 print(f"\n{'─'*50}")
-                print(f"  Point de controle {step['checkpoint']} - Validation humaine")
+                print(f"  Point de controle {step['checkpoint']}{suffix} - Validation humaine")
                 print(f"{'─'*50}")
                 print("\nTaper : CONTINUER | QUITTER | ou un feedback pour correction")
                 feedback = await self._human_checkpoint(step, production, review_output)
@@ -409,37 +543,24 @@ class RiskAnalysisOrchestrator:
                     "answer": feedback[:200],
                 })
 
-                if feedback.upper().strip() == "CONTINUER":
+                answer = feedback.upper().strip()
+                if answer == "CONTINUER":
                     self.state.human_validations[step["id"]] = "validated"
                     print(">> Etape validee.")
-                elif feedback.upper().strip() == "QUITTER":
+                    break
+                if answer == "QUITTER":
                     self.state.human_validations[step["id"]] = "quit"
                     print(">> Analyse interrompue.")
+                    interrupted = True
                     break
-                else:
-                    self.state.human_validations[step["id"]] = feedback
-                    print(f">> Feedback integre, re-generation de l'etape...")
-                    await self._emit({"type": "step_retry", "step_id": step["id"]})
-                    if agent_name == "engineer":
-                        step_copy = dict(step)
-                        step_copy["task"] = (
-                            f"{step['task']}\n\n## FEEDBACK HUMAIN A INTEGRER\n{feedback}"
-                        )
-                        retry = await self._run_engineer_step(step_copy)
-                    else:
-                        retry = await self._ask_agent(
-                            self.secretary,
-                            self._secretary_task(step, human_feedback=feedback),
-                        )
-                    all_outputs[step["id"]] = retry
-                    self.state.outputs[step["id"]] = retry
-                    await self._emit({
-                        "type": "production",
-                        "step_id": step["id"],
-                        "agent": agent_name,
-                        "text": retry,
-                    })
-                    print(">> Etape re-generee avec le feedback.")
+
+                feedbacks.append(feedback)
+                self.state.human_validations[step["id"]] = feedback
+                iteration += 1
+                print(">> Feedback enregistre, nouvelle iteration...")
+
+            if interrupted:
+                break
 
         print(f"\n{'='*70}\n  Analyse terminee\n{'='*70}")
         await self._emit({"type": "done"})

@@ -52,10 +52,15 @@ class EngineerAgent:
     def __init__(self, model_client: OpenAIChatCompletionClient):
         self.model_client = model_client
         system_message = _load_prompt("engineer")
+        # Streaming optionnel sur l'agent a outils : si le tool calling en
+        # streaming pose probleme avec un serveur, LLM_STREAM_ENGINEER=false.
+        stream_engineer = os.getenv("LLM_STREAM_ENGINEER", "true").lower() in (
+            "1", "true", "yes",
+        )
         self._agent = AssistantAgent(
             name="Ingenieur_Technique_SDF",
             model_client=model_client,
-            model_client_stream=True,  # streaming : evite les timeouts sur longues generations locales
+            model_client_stream=stream_engineer,
             system_message=system_message,
             tools=[_search_rag, _search_by_topic],
             description="Expert SDF/RAMS. Exécute les étapes 1-6: cadrage, extraction, filtrage, scénarios, cotation, barrières. Utilise search_rag pour chercher dans la base documentaire.",

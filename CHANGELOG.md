@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.3.4] - 2026-08-31
+
+### Corrige
+- **Boucle de raffinement par etape** : apres un feedback, la re-generation est
+  suivie d'une nouvelle relecture et d'un nouveau point de controle sur la meme
+  etape (avant : un seul feedback possible, resultat jamais re-presente).
+- **Memoire des agents purgee a chaque tour** (`model_context.clear()`) : l'ancien
+  comportement (`UnboundedChatCompletionContext`) accumulait tout l'historique,
+  noyait les feedbacks humains dans le contexte et gonflait le prefill. La
+  continuite est assuree par le chaînage explicite deja en place.
+- **Re-generations auto-contenues** : la production precedente et tous les
+  feedbacks humains sont injectes en tete de tache (le modele voit ce qu'il
+  corrige et ce qui est demande, sans dependre de sa memoire).
+- **Relecteurs informes** : sur iteration, Qualite/Client recoivent le contexte
+  « le jury humain a demande… » et verifient l'integration.
+- **RAG PDF nettoye** : suppression des en-tetes/pieds de page repetes (lignes
+  communes a >= 50% des pages, numeros de page) et fusion des micro-chunks
+  (< 300 car.) — les datasheets produisaient beaucoup de chunks-junk qui
+  saturaient la recherche hybride.
+- Flag `LLM_STREAM_ENGINEER` (defaut `true`) : desactive le streaming sur le seul
+  agent a outils si le tool calling en streaming pose probleme.
+
+### Rollback
+- Etat pre-modification : commit `d48e58b`
+
 ## [1.3.3] - 2026-08-31
 
 ### Ajout
