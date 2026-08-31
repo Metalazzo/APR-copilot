@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.3.2] - 2026-08-31
+
+### Corrige
+- **APITimeoutError sur re-generation** : le timeout de 600 s etait insuffisant pour
+  les longues generations locales (prefill de prompts cumules + thinking + jusqu'a
+  16k tokens de sortie). Le timeout passe a **1800 s** et les retries a **1**
+  (retenter une generation de 30 min etait contre-productif).
+- **Streaming active sur les 4 agents** (`model_client_stream=True`) : les headers
+  arrivent immediatement et le timeout s'applique entre chunks — une generation
+  de 30 min passe desormais sans timeout.
+
+### Ajout
+- GUI : message d'erreur explicite en cas de timeout avec pistes (timeout, max_tokens,
+  Thinking off, Flash Attention + KV cache q8_0).
+- README : section « Performances en local » (Thinking, Flash Attention, calibration
+  du timeout, impact du KV cache).
+
+### Rollback
+- Commit de reference de l'etat pre-correction : `ee839b1`
+  (`git revert` / `git checkout ee839b1 -- .` pour revenir en arriere).
+
 ## [1.3.1] - 2026-08-30
 
 ### Corrige

@@ -105,6 +105,23 @@ calling, pris en charge par le serveur LM Studio — garder `LLM_FUNCTION_CALLIN
 `LLM_FUNCTION_CALLING=false` : l'orchestrateur injecte de toute facon le contexte
 RAG dans chaque tache.
 
+### Performances en local (eviter les timeouts)
+
+Les prompts cumulent du contexte au fil des etapes (RAG + travaux precedents) et les
+generations peuvent etre longues sur un 27-35B local. Le client utilise desormais le
+**streaming** (le timeout s'applique entre chunks, pas sur la generation entiere) avec
+un timeout de 1800 s par requete et 1 retry.
+
+- **Desactivez le Thinking/Reasoning** du modele dans LM Studio (ou mettez-le sur
+  « low ») : gain de plusieurs minutes par requete, l'APR n'en a pas besoin.
+- **Activez Flash Attention et quantifiez le KV cache (q8_0)** au chargement : divise
+  la memoire du KV cache par ~2, evite l'offload CPU, accelere le prefill.
+- **Calibrez le timeout** avec les stats reelles de LM Studio (tok/s, TTFT) :
+  `LLM_TIMEOUT > (tokens du prompt / prefill tok/s) + (max_tokens / generation tok/s)`.
+- **Grand contexte = gros KV cache** : ~100 Ko/token en FP16 pour un 27-35B, soit
+  ~10 Go pour 100k tokens. Si la VRAM ne suffit pas, LM Studio offload sur CPU et
+  tout ralentit.
+
 ## Utilisation
 
 ### Lancement rapide (interface graphique)

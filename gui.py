@@ -284,7 +284,22 @@ async def start_analysis():
         ui.notify(f"Analyse terminee — {md_path}", type="positive")
     except Exception as exc:
         log.push(f"[ERREUR] {type(exc).__name__}: {exc}")
-        ui.notify(f"Erreur pendant l'analyse : {exc}", type="negative")
+        if "timed out" in str(exc).lower() or "APITimeoutError" in type(exc).__name__:
+            timeout_s = int(float(os.getenv("LLM_TIMEOUT", "1800")))
+            log.push("[ERREUR] Timeout depasse. Pistes :")
+            log.push(f"  - augmenter le timeout (actuellement {timeout_s} s)")
+            log.push("  - reduire max_tokens")
+            log.push("  - desactiver le Thinking du modele dans LM Studio (gain majeur)")
+            log.push("  - activer Flash Attention + KV cache q8_0 au chargement")
+            ui.notify(
+                f"Generation trop longue : timeout de {timeout_s} s depasse. "
+                "Pistes dans le journal : augmenter le timeout, reduire max_tokens, "
+                "desactiver le Thinking dans LM Studio, activer Flash Attention.",
+                type="negative",
+                multi_line=True,
+            )
+        else:
+            ui.notify(f"Erreur pendant l'analyse : {exc}", type="negative")
     finally:
         analysis_running = False
         run_btn.enable()
@@ -375,7 +390,7 @@ def build_page() -> None:
                 with ui.row().classes("w-full items-center"):
                     timeout_input = ui.number(
                         "Timeout appel LLM (s)",
-                        value=float(os.getenv("LLM_TIMEOUT", "600")),
+                        value=float(os.getenv("LLM_TIMEOUT", "1800")),
                         format="%.0f", min=30,
                     ).props("label-always")
                     retries_input = ui.number(

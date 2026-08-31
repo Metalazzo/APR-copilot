@@ -33,6 +33,7 @@ class EngineerAgent:
         self._agent = AssistantAgent(
             name="Ingenieur_Technique_SDF",
             model_client=model_client,
+            model_client_stream=True,  # streaming : evite les timeouts sur longues generations locales
             system_message=system_message,
             tools=[_search_rag, _search_by_topic],
             description="Expert SDF/RAMS. Exécute les étapes 1-6: cadrage, extraction, filtrage, scénarios, cotation, barrières. Utilise search_rag pour chercher dans la base documentaire.",
@@ -55,6 +56,7 @@ class QualityAgent:
         self._agent = AssistantAgent(
             name="Animateur_Qualite",
             model_client=model_client,
+            model_client_stream=True,
             system_message=system_message,
             description="Contrôle qualité interne. Vérifie cohérence, traçabilité, vocabulaire, conformité template. Prépare la validation humaine.",
         )
@@ -71,6 +73,7 @@ class ClientAgent:
         self._agent = AssistantAgent(
             name="Representant_Client",
             model_client=model_client,
+            model_client_stream=True,
             system_message=system_message,
             description="Point de vue utilisateur final. Challenge le filtrage, évalue le réalisme des barrières, vérifie l'actionnabilité, détecte les angles morts.",
         )
@@ -87,6 +90,7 @@ class SecretaryAgent:
         self._agent = AssistantAgent(
             name="Secretaire",
             model_client=model_client,
+            model_client_stream=True,
             system_message=system_message,
             description="Mise en forme et restitution. Assemble les 4 blocs, formate en Markdown/CSV/JSON, vérifie conformité template.",
         )

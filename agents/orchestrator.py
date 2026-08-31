@@ -475,10 +475,12 @@ def client_from_profile(
             "structured_output": False,
             "family": "unknown",
         },
-        # Kwarg transmis a l'AsyncOpenAI sous-jacent : indispensable en local,
-        # la generation avec un gros modele peut depasser les timeouts par defaut.
-        timeout=float(os.getenv("LLM_TIMEOUT", "600")),
-        max_retries=int(os.getenv("LLM_MAX_RETRIES", "3")),
+        # Kwarg transmis a l'AsyncOpenAI sous-jacent : indispensable en local.
+        # 1800 s car sans streaming la generation entiere doit tenir dans le
+        # timeout ; le streaming (model_client_stream=True cote agents) fait
+        # que le timeout s'applique entre chunks.
+        timeout=float(os.getenv("LLM_TIMEOUT", "1800")),
+        max_retries=int(os.getenv("LLM_MAX_RETRIES", "1")),
     )
 
 
