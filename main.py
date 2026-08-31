@@ -1,10 +1,12 @@
 import argparse
 import asyncio
-import json
+import os
+import sys
 from pathlib import Path
 
 from agents.agents import EngineerAgent, QualityAgent, ClientAgent, SecretaryAgent
 from agents.orchestrator import RiskAnalysisOrchestrator, create_model_client, create_model_clients
+from output_utils import save_analysis_outputs
 from rag.vector_store import ingest_documents
 from rag.retriever import invalidate_bm25_cache
 from config import config as app_config
@@ -14,7 +16,7 @@ def print_banner():
     print("""
     ================================================================
        RISK ANALYSIS COPILOT - Analyse Preliminaire de Risque
-       Multi-Agent System (Microsoft Agent Framework + Mistral)
+       Multi-Agent System (AutoGen - modeles locaux LM Studio ou cloud)
     ================================================================
     """)
 
@@ -28,10 +30,10 @@ async def ingest_command(args):
     print(f"Ingestion des documents depuis : {directory}")
     print(f"Vector store : {app_config.rag.persist_directory}")
 
-    count = ingest_documents(directory, reset=args.reset)
+    report = ingest_documents(directory, reset=args.reset)
     invalidate_bm25_cache()
 
-    print(f"Ingestion terminee : {count} chunks indexes.")
+    print(report.summary())
     print(f"Collection : {app_config.rag.collection_name}")
 
 
@@ -65,15 +67,27 @@ async def analyze_command(args):
             print(f"ERREUR: Fichier '{args.context_file}' introuvable.")
             return
 
+    mode = args.profile or app_config.profiles.agent_profile
+    valid_modes = ("hybrid", "cloud", "local")
+    if mode not in valid_modes:
+        print(f"ERREUR: Profil d'affectation invalide : {mode!r} (attendus : {', '.join(valid_modes)}).")
+        return
+
     print_banner()
-    print(f"Modele cloud (complex) : {app_config.profiles.cloud.model}")
-    print(f"Modele local (formatage) : {app_config.profiles.local.model}")
+    print(f"Affectation des modeles : {mode}")
+    print(f"Modele cloud : {app_config.profiles.cloud.model}")
+    print(f"Modele local : {app_config.profiles.local.model}")
     print(f"Projet : {args.project}")
     print()
 
-    clients = create_model_clients()
-    cloud_client = clients["cloud"]
-    local_client = clients["local"]
+    clients = create_model_clients(mode)
+    if mode == "cloud":
+        cloud_client = local_client = clients["cloud"]
+    elif mode == "local":
+        cloud_client = local_client = clients["local"]
+    else:  # hybrid : cloud pour les agents complexes, local pour le Secretaire
+        cloud_client = clients["cloud"]
+        local_client = clients["local"]
 
     engineer_wrapper = EngineerAgent(cloud_client)
     quality_wrapper = QualityAgent(cloud_client)
@@ -105,26 +119,24 @@ async def analyze_command(args):
 
     outputs = await orchestrator.run_full_analysis(initial_context=context)
 
-    output_path = app_config.output_dir / f"{args.project}_analyse.md"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    livraison = outputs.get("livraison", "")
-    if livraison:
-        output_path.write_text(livraison, encoding="utf-8")
+    output_path, json_path = save_analysis_outputs(
+        outputs, args.project, app_config.output_dir
+    )
+    if outputs.get("livraison"):
         print(f"\nDocument final sauvegarde : {output_path}")
     else:
-        combined = "\n\n".join(f"# {k}\n\n{v}" for k, v in outputs.items())
-        output_path.write_text(combined, encoding="utf-8")
         print(f"\nResultats sauvegardes : {output_path}")
-
-    json_path = output_path.with_suffix(".json")
-    json_path.write_text(
-        json.dumps({"project": args.project, "steps": {k: str(v)[:5000] for k, v in outputs.items()}}, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
 
 
 def main():
+    # Console/pipe Windows : force UTF-8 afin que les sorties LLM (fleches,
+    # accents, emojis...) ne fassent pas planter l'analyse avec un
+    # UnicodeEncodeError cp1252 quand la sortie est redirigee.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(
         description="Risk Analysis Copilot - Analyse Preliminaire de Risque (APR)"
     )
@@ -143,6 +155,12 @@ def main():
     analyze_parser.add_argument("--context", "-c", help="Description/contexte du systeme (texte)")
     analyze_parser.add_argument("--context-file", "-f", help="Fichier contenant la description du systeme")
     analyze_parser.add_argument("--output-dir", "-o", default=None, help="Repertoire de sortie")
+    analyze_parser.add_argument(
+        "--profile",
+        choices=["hybrid", "cloud", "local"],
+        default=None,
+        help="Affectation des modeles aux agents (defaut : AGENT_PROFILE, sinon hybrid)",
+    )
 
     args = parser.parse_args()
 

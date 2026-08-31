@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass, field
 from typing import Optional, Callable, Awaitable
 
@@ -5,7 +6,7 @@ from autogen_agentchat.agents import AssistantAgent
 from autogen_agentchat.teams import RoundRobinGroupChat
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 
-from config import config as app_config
+from config import ModelProfile, config as app_config
 from rag.retriever import retrieve, format_retrieved_context
 from state import AnalysisState
 
@@ -219,13 +220,26 @@ class RiskAnalysisOrchestrator:
         client: AssistantAgent,
         secretary: AssistantAgent,
         human_callback: Optional[Callable[..., Awaitable[str]]] = None,
+        progress_callback: Optional[Callable[[dict], Awaitable[None]]] = None,
     ):
         self.engineer = engineer
         self.quality = quality
         self.client_agent = client
         self.secretary = secretary
         self.human_callback = human_callback
+        # Callback optionnel de progression (GUI) : recoit des evenements
+        # structures (step_start, production, review, checkpoint...).
+        self.progress_callback = progress_callback
         self.state = OrchestratorState()
+
+    async def _emit(self, event: dict) -> None:
+        """Notifie la GUI si presente ; une erreur d'affichage ne casse jamais l'analyse."""
+        if self.progress_callback is None:
+            return
+        try:
+            await self.progress_callback(event)
+        except Exception:
+            pass
 
     async def _ask_agent(self, agent: AssistantAgent, task: str) -> str:
         team = RoundRobinGroupChat(
@@ -238,20 +252,72 @@ class RiskAnalysisOrchestrator:
             return str(messages[-1].content)
         return ""
 
+    PREVIOUS_OUTPUT_LIMIT = 6000  # caracteres max par etape precedente reinjectee
+
+    def _previous_outputs_section(self, exclude_step_id: str = "") -> str:
+        """Assemble les productions des etapes deja realisees pour le contexte."""
+        parts = []
+        for done_step in WORKFLOW_STEPS:
+            if done_step["id"] == exclude_step_id:
+                continue
+            out = self.state.outputs.get(done_step["id"])
+            if not out:
+                continue
+            trimmed = out[: self.PREVIOUS_OUTPUT_LIMIT]
+            if len(out) > self.PREVIOUS_OUTPUT_LIMIT:
+                trimmed += "\n[... tronque ...]"
+            parts.append(f"### {done_step['name']}\n{trimmed}")
+        if not parts:
+            return ""
+        return "\n\n".join(parts)
+
     async def _run_engineer_step(self, step: dict) -> str:
+        description = self.state.analysis_state.system_description
         rag_query = f"Analyse de risque {step['id']}"
-        if self.state.analysis_state.system_description:
-            rag_query += f" {self.state.analysis_state.system_description}"
+        if description:
+            rag_query += f" {description}"
 
         rag_chunks = retrieve(rag_query, top_k=5)
         rag_context = format_retrieved_context(rag_chunks)
 
-        enriched_task = (
-            f"## Contexte documentaire (RAG)\n{rag_context}\n\n"
+        enriched_task = f"## Contexte documentaire (RAG)\n{rag_context}\n\n"
+        if description:
+            enriched_task += (
+                f"## Description du systeme fournie par l'utilisateur (reference principale)\n"
+                f"{description[:8000]}\n\n"
+            )
+        previous = self._previous_outputs_section(exclude_step_id=step["id"])
+        if previous:
+            enriched_task += (
+                f"## Travaux precedents de l'analyse (a respecter et prolonger)\n"
+                f"{previous}\n\n"
+            )
+        enriched_task += (
             f"## Tache\n{step['task']}\n\n"
             f"Tu peux aussi utiliser l'outil search_rag pour approfondir tes recherches."
         )
         return await self._ask_agent(self.engineer, enriched_task)
+
+    def _secretary_task(self, step: dict, human_feedback: str = "") -> str:
+        """Constitue la tache du Secretaire : template + travaux precedents a assembler."""
+        task = (
+            f"{step['task']}\n\n"
+            f"## Consignes de restitution\n"
+            f"- Reponds UNIQUEMENT avec le document final, sans preambule, sans "
+            f"commentaire meta, sans mention du processus ou du format genere.\n"
+            f"- Reprends fidelement les travaux precedents fournis ci-dessous : "
+            f"n'invente aucun risque, aucune barriere ni aucune donnee qui n'y "
+            f"figure pas."
+        )
+        if human_feedback:
+            task += f"\n\n## FEEDBACK HUMAIN A INTEGRER\n{human_feedback}"
+        previous = self._previous_outputs_section(exclude_step_id=step["id"])
+        if previous:
+            task += (
+                f"\n\n## Travaux precedents de l'analyse (source unique de verite)\n"
+                f"{previous}"
+            )
+        return task
 
     async def _run_reviewer_step(self, step: dict, engineer_output: str) -> str:
         reviewer_name = step.get("reviewer")
@@ -288,6 +354,12 @@ class RiskAnalysisOrchestrator:
 
         for i, step in enumerate(WORKFLOW_STEPS):
             self.state.step_index = i
+            await self._emit({
+                "type": "step_start",
+                "step_id": step["id"],
+                "name": step["name"],
+                "agent": step["agent"],
+            })
 
             header = f"\n{'='*70}\n  {step['name']}\n{'='*70}"
             print(header)
@@ -296,10 +368,18 @@ class RiskAnalysisOrchestrator:
             if agent_name == "engineer":
                 production = await self._run_engineer_step(step)
             else:
-                production = await self._ask_agent(self.secretary, step["task"])
+                production = await self._ask_agent(
+                    self.secretary, self._secretary_task(step)
+                )
 
             all_outputs[step["id"]] = production
             self.state.outputs[step["id"]] = production
+            await self._emit({
+                "type": "production",
+                "step_id": step["id"],
+                "agent": agent_name,
+                "text": production,
+            })
             print(f"\n[Production - {agent_name}]")
             print(production[:1500] + ("..." if len(production) > 1500 else ""))
 
@@ -308,14 +388,26 @@ class RiskAnalysisOrchestrator:
                 print(f"\n[Relecture - {step['reviewer']}]")
                 review_output = await self._run_reviewer_step(step, production)
                 self.state.reviews[step["id"]] = review_output
+                await self._emit({
+                    "type": "review",
+                    "step_id": step["id"],
+                    "reviewer": step["reviewer"],
+                    "text": review_output,
+                })
                 print(review_output[:1500] + ("..." if len(review_output) > 1500 else ""))
 
             if step["checkpoint"]:
+                await self._emit({"type": "checkpoint", "step_id": step["id"]})
                 print(f"\n{'─'*50}")
                 print(f"  Point de controle {step['checkpoint']} - Validation humaine")
                 print(f"{'─'*50}")
                 print("\nTaper : CONTINUER | QUITTER | ou un feedback pour correction")
                 feedback = await self._human_checkpoint(step, production, review_output)
+                await self._emit({
+                    "type": "checkpoint_answer",
+                    "step_id": step["id"],
+                    "answer": feedback[:200],
+                })
 
                 if feedback.upper().strip() == "CONTINUER":
                     self.state.human_validations[step["id"]] = "validated"
@@ -327,6 +419,7 @@ class RiskAnalysisOrchestrator:
                 else:
                     self.state.human_validations[step["id"]] = feedback
                     print(f">> Feedback integre, re-generation de l'etape...")
+                    await self._emit({"type": "step_retry", "step_id": step["id"]})
                     if agent_name == "engineer":
                         step_copy = dict(step)
                         step_copy["task"] = (
@@ -336,17 +429,61 @@ class RiskAnalysisOrchestrator:
                     else:
                         retry = await self._ask_agent(
                             self.secretary,
-                            f"{step['task']}\n\n## FEEDBACK HUMAIN A INTEGRER\n{feedback}",
+                            self._secretary_task(step, human_feedback=feedback),
                         )
                     all_outputs[step["id"]] = retry
                     self.state.outputs[step["id"]] = retry
+                    await self._emit({
+                        "type": "production",
+                        "step_id": step["id"],
+                        "agent": agent_name,
+                        "text": retry,
+                    })
                     print(">> Etape re-generee avec le feedback.")
 
         print(f"\n{'='*70}\n  Analyse terminee\n{'='*70}")
+        await self._emit({"type": "done"})
         return all_outputs
 
 
+def client_from_profile(
+    profile: ModelProfile,
+    function_calling: bool = True,
+) -> OpenAIChatCompletionClient:
+    """Construit un client AutoGen depuis un ModelProfile explicite (GUI, CLI...)."""
+    if not profile.model or not profile.model.strip():
+        raise ValueError("Aucun modele selectionne.")
+    if not profile.base_url or not profile.base_url.strip():
+        raise ValueError("Aucune URL de serveur LLM (base_url) configuree.")
+    if not profile.api_key or not profile.api_key.strip():
+        raise ValueError(
+            "Aucune cle API configuree "
+            "(pour un serveur local type LM Studio, une valeur quelconque suffit)."
+        )
+    return OpenAIChatCompletionClient(
+        model=profile.model,
+        base_url=profile.base_url,
+        api_key=profile.api_key,
+        temperature=profile.temperature,
+        max_tokens=profile.max_tokens,
+        model_info={
+            # AutoGen exige un model_info explicite pour un modele hors famille GPT
+            # (LM Studio, DeepSeek...). Le tool calling depend du modele/serveur.
+            "vision": False,
+            "function_calling": function_calling,
+            "json_output": False,
+            "structured_output": False,
+            "family": "unknown",
+        },
+        # Kwarg transmis a l'AsyncOpenAI sous-jacent : indispensable en local,
+        # la generation avec un gros modele peut depasser les timeouts par defaut.
+        timeout=float(os.getenv("LLM_TIMEOUT", "600")),
+        max_retries=int(os.getenv("LLM_MAX_RETRIES", "3")),
+    )
+
+
 def create_model_client(profile_name: str = "default") -> OpenAIChatCompletionClient:
+    """Construit un client depuis la configuration par variables d'environnement."""
     profiles = app_config.profiles
     if profile_name == "default":
         profile_name = profiles.default
@@ -355,19 +492,31 @@ def create_model_client(profile_name: str = "default") -> OpenAIChatCompletionCl
         "cloud": profiles.cloud,
         "local": profiles.local,
     }
-    profile = profile_map.get(profile_name, profiles.cloud)
-
-    return OpenAIChatCompletionClient(
-        model=profile.model,
-        base_url=profile.base_url,
-        api_key=profile.api_key,
-        temperature=profile.temperature,
-        max_tokens=profile.max_tokens,
+    if profile_name not in profile_map:
+        raise ValueError(
+            f"Profil modele inconnu : {profile_name!r} (attendus : cloud, local)"
+        )
+    profile = profile_map[profile_name]
+    if not profile.api_key or not profile.api_key.strip():
+        env_var = "CLOUD_API_KEY" if profile_name == "cloud" else "LOCAL_API_KEY"
+        raise ValueError(
+            f"Aucune cle API configuree pour le profil {profile_name!r}. "
+            f"Definissez la variable d'environnement {env_var} "
+            f"(pour un serveur local type LM Studio, une valeur quelconque suffit)."
+        )
+    function_calling = os.getenv("LLM_FUNCTION_CALLING", "true").lower() in (
+        "1", "true", "yes",
     )
+    return client_from_profile(profile, function_calling=function_calling)
 
 
-def create_model_clients() -> dict[str, OpenAIChatCompletionClient]:
-    return {
-        "cloud": create_model_client("cloud"),
-        "local": create_model_client("local"),
-    }
+def create_model_clients(mode: str = "hybrid") -> dict[str, OpenAIChatCompletionClient]:
+    # N'instancie que les profils reellement utilises : evite notamment de creer
+    # le client cloud (qui exige une CLOUD_API_KEY valide) quand on tourne en
+    # 100% local.
+    clients: dict[str, OpenAIChatCompletionClient] = {}
+    if mode in ("hybrid", "cloud"):
+        clients["cloud"] = create_model_client("cloud")
+    if mode in ("hybrid", "local"):
+        clients["local"] = create_model_client("local")
+    return clients

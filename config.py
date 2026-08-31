@@ -1,18 +1,8 @@
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 PROJECT_ROOT = Path(__file__).parent
-
-
-@dataclass
-class LLMConfig:
-    model: str = os.getenv("LLM_MODEL", "mistral-large")
-    base_url: str = os.getenv("LLM_BASE_URL", "http://localhost:8080/v1")
-    api_key: str = os.getenv("LLM_API_KEY", "not-needed")
-    temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.3"))
-    max_tokens: int = int(os.getenv("LLM_MAX_TOKENS", "4096"))
 
 
 @dataclass
@@ -49,14 +39,19 @@ class ModelProfiles:
         base_url=os.getenv("LOCAL_BASE_URL", "http://localhost:1234/v1"),
         api_key=os.getenv("LOCAL_API_KEY", "not-needed"),
         temperature=float(os.getenv("LOCAL_TEMPERATURE", "0.3")),
-        max_tokens=int(os.getenv("LOCAL_MAX_TOKENS", "4096")),
+        max_tokens=int(os.getenv("LOCAL_MAX_TOKENS", "16384")),
     ))
     default: str = os.getenv("DEFAULT_PROFILE", "cloud")
+
+    # Affectation des modeles aux agents :
+    #   hybrid = cloud pour Ingenieur/Qualite/Client, local pour Secretaire (historique)
+    #   cloud  = tous les agents sur le profil cloud
+    #   local  = tous les agents sur le profil local
+    agent_profile: str = os.getenv("AGENT_PROFILE", "hybrid")
 
 
 @dataclass
 class AppConfig:
-    llm: LLMConfig = field(default_factory=LLMConfig)
     profiles: ModelProfiles = field(default_factory=ModelProfiles)
     rag: RAGConfig = field(default_factory=RAGConfig)
     input_dir: Path = PROJECT_ROOT / "test" / "sample_docs"

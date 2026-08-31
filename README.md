@@ -17,8 +17,9 @@ Systeme multi-agent d'assistance a l'Analyse Preliminaire de Risque (APR) en con
 ## Stack technique
 
 - **Orchestration** : Microsoft Agent Framework (`autogen-agentchat` >= 0.4.0)
-- **LLM** : Mistral Large (deploiement local, API compatible OpenAI)
+- **LLM** : tout modele expose via une API compatible OpenAI — LM Studio en local (ex. Qwen3 32B/35B), ou API cloud (DeepSeek...)
 - **RAG** : ChromaDB + sentence-transformers + BM25 (retrieval hybride)
+- **GUI** : NiceGUI (interface web locale, `python gui.py`)
 - **Formats supportes** : `.txt`, `.md`, `.pdf`, `.docx`
 
 ## Pre-requis
@@ -47,6 +48,16 @@ Variables d'environnement (ou modifier `config.py`) :
 | `LOCAL_BASE_URL` | `http://localhost:1234/v1` | URL LM Studio |
 | `LOCAL_API_KEY` | `not-needed` | Cle API |
 
+**Affectation des modeles et robustesse :**
+
+| Variable | Defaut | Description |
+|----------|--------|-------------|
+| `AGENT_PROFILE` | `hybrid` | Affectation des agents : `hybrid` (cloud = Ingenieur/Qualite/Client, local = Secretaire), `cloud` (tout sur cloud), `local` (tout en local). Surcharge par `--profile` |
+| `DEFAULT_PROFILE` | `cloud` | Profil utilise quand aucun nom explicite n'est donne |
+| `LLM_FUNCTION_CALLING` | `true` | Mettre `false` si le serveur ne supporte pas le tool calling |
+| `LLM_TIMEOUT` | `600` | Timeout (secondes) par appel LLM — valeur large conseillee en local |
+| `LLM_MAX_RETRIES` | `3` | Nombre de tentatives par appel LLM |
+
 **RAG :**
 
 | Variable | Defaut | Description |
@@ -54,7 +65,60 @@ Variables d'environnement (ou modifier `config.py`) :
 | `CHROMA_PERSIST_DIR` | `./chroma_db` | Repertoire du vector store |
 | `EMBEDDING_MODEL` | `intfloat/multilingual-e5-large` | Modele d'embeddings |
 
+### Exemple : 100% local avec LM Studio
+
+1. Dans LM Studio : charger le modele voulu (ex. Qwen3 35B quantize), demarrer le
+   serveur (onglet *Developer* > *Start Server*) et verifier la fenetre de contexte :
+   16384 tokens minimum (le defaut de 4096 tronquerait les prompts enrichis par le RAG),
+   davantage si votre build le permet (ex. 256k sur Qwen3 35B).
+2. Recuperer l'identifiant exact du modele charge :
+
+```bash
+curl http://localhost:1234/v1/models
+```
+
+3. Configurer puis lancer :
+
+```bash
+export LOCAL_MODEL="<id_exact_affiche_par_lm_studio>"
+export LOCAL_BASE_URL="http://localhost:1234/v1"
+export DEFAULT_PROFILE="local"
+export AGENT_PROFILE="local"
+
+# Optionnel : avec un grand contexte (ex. 256k), autoriser des livrables plus longs
+# export LOCAL_MAX_TOKENS="8192"
+
+python main.py analyze -p "Test_Projet" -f ./test/sample_docs/description_systeme.txt
+```
+
+> **WSL2** : si le script tourne dans WSL alors que LM Studio tourne sous Windows,
+> `localhost` n'atteint pas l'hote sauf si le reseau WSL est en mode `mirrored`.
+> Sinon, viser l'IP de l'hote Windows :
+>
+> ```bash
+> export LOCAL_BASE_URL="http://$(ip route show default | awk '{print $3}'):1234/v1"
+> ```
+
+**Tool calling** : les modeles Qwen3 utilisent nativement le format Hermes de tool
+calling, pris en charge par le serveur LM Studio — garder `LLM_FUNCTION_CALLING=true`
+(defaut). En cas de souci avec un autre modele/serveur, relancer avec
+`LLM_FUNCTION_CALLING=false` : l'orchestrateur injecte de toute facon le contexte
+RAG dans chaque tache.
+
 ## Utilisation
+
+### Lancement rapide (interface graphique)
+
+```bash
+python gui.py
+```
+
+Ouvre un navigateur sur `http://localhost:8080` : choix du profil (hybride/cloud/local),
+liste des modeles LM Studio en direct, parametres (temperature, max_tokens, tool calling),
+gestion du RAG (ingestion, statut), lancement d'analyse avec affichage en direct des etapes
+et points de controle interactifs (CONTINUER / QUITTER / feedback).
+
+Options : `--port 8090`, `--no-show`, `--reload` (dev).
 
 ### 1. Indexer les documents de reference (RAG)
 
