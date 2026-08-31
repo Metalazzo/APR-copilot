@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.3] - 2026-08-31
+
+### Ajout
+- **Pilotage du raisonnement par template** : `LLM_REASONING` (off/low/medium/high/xhigh)
+  ajoute le jeton correspondant (`<|think_off|>`, `<|think_low|>`…) au message systeme
+  de chaque agent — interprete par le template Jinja du modele cote LM Studio.
+  Defaut `off` : supprime la phase de thinking, principal facteur de duree des
+  requetes locales. Selecteur « Niveau de raisonnement » dans la GUI (Parametres
+  avances).
+
+### Rollback
+- Etat pre-modification : commit `5c7c140`
+
 ## [1.3.2] - 2026-08-31
 
 ### Corrige

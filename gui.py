@@ -206,9 +206,10 @@ async def start_analysis():
         return
     project = (project_input.value or "").strip() or "Sans_Nom"
 
-    # Parametres avances lus via env par client_from_profile
-    os.environ["LLM_TIMEOUT"] = str(int(timeout_input.value or 600))
-    os.environ["LLM_MAX_RETRIES"] = str(int(retries_input.value or 3))
+    # Parametres avances lus via env par client_from_profile / _load_prompt
+    os.environ["LLM_TIMEOUT"] = str(int(timeout_input.value or 1800))
+    os.environ["LLM_MAX_RETRIES"] = str(int(retries_input.value or 1))
+    os.environ["LLM_REASONING"] = str(reasoning_select.value or "off")
 
     def _local_profile() -> ModelProfile:
         return ModelProfile(
@@ -313,7 +314,7 @@ async def start_analysis():
 def build_page() -> None:
     global log, mode_radio, local_base_url, local_model, local_api_key, local_temp, local_max_tokens
     global cloud_model, cloud_base_url, cloud_api_key, cloud_temp, cloud_max_tokens
-    global function_calling_switch, timeout_input, retries_input
+    global function_calling_switch, timeout_input, retries_input, reasoning_select
     global ingest_dir, ingest_reset, ingest_btn, ingest_progress
     global project_input, context_input, run_btn, run_progress
 
@@ -387,6 +388,17 @@ def build_page() -> None:
 
             with ui.expansion("Parametres avances", icon="tune").classes("w-full"):
                 function_calling_switch = ui.switch("Tool calling", value=True)
+                reasoning_select = ui.select(
+                    {
+                        "off": "Off (rapide)",
+                        "low": "Low",
+                        "medium": "Medium",
+                        "high": "High",
+                        "xhigh": "XHigh",
+                    },
+                    value=os.getenv("LLM_REASONING", "off"),
+                    label="Niveau de raisonnement",
+                ).classes("w-full")
                 with ui.row().classes("w-full items-center"):
                     timeout_input = ui.number(
                         "Timeout appel LLM (s)",

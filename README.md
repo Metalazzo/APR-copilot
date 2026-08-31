@@ -55,6 +55,7 @@ Variables d'environnement (ou modifier `config.py`) :
 | `AGENT_PROFILE` | `hybrid` | Affectation des agents : `hybrid` (cloud = Ingenieur/Qualite/Client, local = Secretaire), `cloud` (tout sur cloud), `local` (tout en local). Surcharge par `--profile` |
 | `DEFAULT_PROFILE` | `cloud` | Profil utilise quand aucun nom explicite n'est donne |
 | `LLM_FUNCTION_CALLING` | `true` | Mettre `false` si le serveur ne supporte pas le tool calling |
+| `LLM_REASONING` | `off` | Niveau de raisonnement injecte au message systeme : `off`/`low`/`medium`/`high`/`xhigh` (jetons interpretes par le template Jinja du modele) |
 | `LLM_TIMEOUT` | `600` | Timeout (secondes) par appel LLM — valeur large conseillee en local |
 | `LLM_MAX_RETRIES` | `3` | Nombre de tentatives par appel LLM |
 
@@ -112,8 +113,11 @@ generations peuvent etre longues sur un 27-35B local. Le client utilise desormai
 **streaming** (le timeout s'applique entre chunks, pas sur la generation entiere) avec
 un timeout de 1800 s par requete et 1 retry.
 
-- **Desactivez le Thinking/Reasoning** du modele dans LM Studio (ou mettez-le sur
-  « low ») : gain de plusieurs minutes par requete, l'APR n'en a pas besoin.
+- **Desactivez ou reduisez le Thinking/Reasoning** : defaut desormais `off` via
+  `LLM_REASONING` (reglable aussi dans la GUI, « Niveau de raisonnement »). Le jeton
+  correspondant (`<|think_off|>`, `<|think_low|>`, `<|think_medium|>`…) est ajoute au
+  message systeme et interprete par le template Jinja du modele (Qwen3.8 : off, low,
+  medium, high, xhigh). Gain de plusieurs minutes par requete.
 - **Activez Flash Attention et quantifiez le KV cache (q8_0)** au chargement : divise
   la memoire du KV cache par ~2, evite l'offload CPU, accelere le prefill.
 - **Calibrez le timeout** avec les stats reelles de LM Studio (tok/s, TTFT) :

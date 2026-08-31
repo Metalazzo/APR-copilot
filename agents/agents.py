@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from autogen_agentchat.agents import AssistantAgent
@@ -7,12 +8,33 @@ from rag.retriever import retrieve, format_retrieved_context
 
 PROMPT_DIR = Path(__file__).parent.parent / "prompts"
 
+# Jetons de controle du raisonnement, interpretes par le template Jinja cote
+# serveur LM Studio (scannes dans les messages system/developer/user).
+# Sur un template sans support de ces jetons, ils restent du texte inoffensif.
+REASONING_TOKENS = {
+    "off": "<|think_off|>",
+    "low": "<|think_low|>",
+    "medium": "<|think_medium|>",
+    "high": "<|think_high|>",
+    "xhigh": "<|think_xhigh|>",
+}
+
+
+def _reasoning_suffix() -> str:
+    """Jeton de niveau de raisonnement ajoute au message systeme.
+
+    LLM_REASONING : off (defaut) | low | medium | high | xhigh.
+    'off' supprime la phase de thinking (gain de temps majeur en local).
+    """
+    level = os.getenv("LLM_REASONING", "off").strip().lower()
+    token = REASONING_TOKENS.get(level)
+    return f"\n\n{token}" if token else ""
+
 
 def _load_prompt(name: str) -> str:
     path = PROMPT_DIR / f"{name}.md"
-    if path.exists():
-        return path.read_text(encoding="utf-8")
-    return ""
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    return text + _reasoning_suffix()
 
 
 async def _search_rag(query: str, top_k: int = 5) -> str:
