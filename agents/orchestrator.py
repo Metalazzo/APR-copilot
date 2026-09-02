@@ -79,13 +79,15 @@ Pour chaque item :
 Utilise l'outil search_rag pour rechercher des informations pertinentes sur les agressions typiques.""",
         "reviewer_task": """Relis le filtrage des agressions/menaces avec le regard du client/utilisateur final. Challenge :
 
-1. Y a-t-il des agressions oubliees qui sont pertinentes pour ce systeme ?
-2. Des agressions marquees 'non applicable' devraient-elles etre 'a confirmer' ?
-3. Les justifications sont-elles convaincantes d'un point de vue operationnel ?
-4. Le niveau de couverture est-il satisfaisant ?
+1. L'analyse reste-t-elle centree sur l'usage et l'integration prevus du produit, sans divergence du besoin client ?
+2. Y a-t-il des agressions oubliees qui sont pertinentes pour ce systeme ?
+3. Des agressions marquees 'non applicable' devraient-elles etre 'a confirmer' ?
+4. Les justifications sont-elles convaincantes d'un point de vue operationnel ?
+5. Le niveau de couverture est-il satisfaisant ?
 
 Reponds avec :
 - STATUT : [OK / A COMPLETER]
+- DIVERGENCE : [non / oui + justification]
 - RISQUES OUBLIES : [liste ou "aucun"]
 - RECLASSIFICATIONS SUGGEREES : [liste ou "aucune"]""",
     },
@@ -156,15 +158,17 @@ Pour chaque barriere :
 Utilise search_rag pour rechercher des barrieres types dans les referentiels du domaine.""",
         "reviewer_task": """Relis les barrieres proposees avec le regard du client/utilisateur final. Evalue :
 
-1. Les barrieres sont-elles realistes (budget, delais, competences) ?
-2. Sont-elles suffisamment concretes ou trop generiques ?
-3. Les barrieres proposees creent-elles de nouveaux risques ?
-4. Distingue-t-on bien barrieres existantes vs recommandees ?
-5. Y a-t-il des barrieres evidentes manquantes ?
-6. Les recommandations sont-elles actionnables par les equipes ?
+1. Les barrieres et l'analyse restent-elles centrees sur l'usage et l'integration prevus du produit, sans divergence du besoin client ?
+2. Les barrieres sont-elles realistes (budget, delais, competences) ?
+3. Sont-elles suffisamment concretes ou trop generiques ?
+4. Les barrieres proposees creent-elles de nouveaux risques ?
+5. Distingue-t-on bien barrieres existantes vs recommandees ?
+6. Y a-t-il des barrieres evidentes manquantes ?
+7. Les recommandations sont-elles actionnables par les equipes ?
 
 Reponds avec :
 - STATUT : [OK / A REVOIR]
+- DIVERGENCE : [non / oui + justification]
 - BARRIERES IRREALISTES : [liste ou "aucune"]
 - BARRIERES TROP GENERIQUES : [liste ou "aucune"]
 - NOUVEAUX RISQUES INTRODUITS : [liste ou "aucun"]""",

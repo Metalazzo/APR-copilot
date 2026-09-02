@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.3.5] - 2026-09-02
+
+### Corrige — cohérence des rôles
+- `engineer.md` : la hiérarchie des sources était inversée — le RAG primait sur le
+  template et les données d'entrée. Nouvel ordre : instructions système + feedback
+  humain > **données d'entrée** (description, tableaux/templates, matrice) > RAG
+  (support seulement) > connaissance générale.
+- `engineer.md` : rôle explicite — conduire les analyses et **remplir exactement les
+  tableaux d'analyse fournis dans les données d'entrée** ; ne jamais juger une analyse
+  déjà faite (relecture = rôle des autres agents) ; exécuter uniquement l'étape de
+  workflow demandée.
+- `client.md` : mission recentrée — **gardien de la non-divergence**, analyse centrée
+  sur l'usage/intégration réels du produit ; frontière « tu ne produis pas l'analyse ».
+- Workflow : les 2 tâches de relecture client (filtrage, barrières) exigent désormais
+  un verdict explicite de divergence.
+
+### Rollback
+- Etat pre-modification : commit `ffaa877`
+
 ## [1.3.4] - 2026-08-31
 
 ### Corrige
