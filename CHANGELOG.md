@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.3.7] - 2026-09-02
+
+### Corrige — Ingenieur produisant du vide / du brut aux etapes avec outils
+- **Cause 1** : autogen 0.7.5 a change le defaut de `reflect_on_tool_use` a `False`
+  — apres execution de `search_rag`, la « production » renvoyee au workflow etait le
+  contenu brut de l'outil (chunks RAG) au lieu d'une analyse redigee.
+- **Cause 2** : dans la phase de reflexion, le modele re-emettait ses appels
+  d'outils en **texte brut `<tool_call>`** (non parses) — production finale = XML.
+- **Correctif structurel** : outils agentic de l'Ingenieur **desactives par defaut**
+  (`LLM_ENGINEER_TOOLS=false`) — le RAG est pre-injecte dans chaque tache
+  (`RAG_TOP_K`, defaut 8). Mentions `search_rag` neutralisees dans les taches du
+  workflow. Re-activables via `LLM_ENGINEER_TOOLS=true` (+ `reflect_on_tool_use=True`).
+- **Priorite des templates verrouillee** : template/tableau/matrice propre au projet
+  (donnees d'entree **ou** RAG) > structure par defaut de la tache > RAG generique.
+- Valide : production d'etape 3 de 10 301 caracteres (analyse FR structuree)
+  contre 440 caracteres de XML avant correctif.
+
+### Rollback
+- Etat pre-modification : commit `56fe5fe`
+
 ## [1.3.6] - 2026-09-02
 
 ### Ameliore — GUI : popup de relecture/decision

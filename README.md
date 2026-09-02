@@ -55,6 +55,7 @@ Variables d'environnement (ou modifier `config.py`) :
 | `AGENT_PROFILE` | `hybrid` | Affectation des agents : `hybrid` (cloud = Ingenieur/Qualite/Client, local = Secretaire), `cloud` (tout sur cloud), `local` (tout en local). Surcharge par `--profile` |
 | `DEFAULT_PROFILE` | `cloud` | Profil utilise quand aucun nom explicite n'est donne |
 | `LLM_FUNCTION_CALLING` | `true` | Mettre `false` si le serveur ne supporte pas le tool calling |
+| `LLM_ENGINEER_TOOLS` | `false` | Outils agentic (`search_rag`) de l'Ingenieur : desactives par defaut (le RAG est pre-injecte dans chaque tache). `true` pour re-activer la boucle d'outils |
 | `LLM_REASONING` | `off` | Niveau de raisonnement injecte au message systeme : `off`/`low`/`medium`/`high`/`xhigh` (jetons interpretes par le template Jinja du modele) |
 | `LLM_TIMEOUT` | `600` | Timeout (secondes) par appel LLM — valeur large conseillee en local |
 | `LLM_MAX_RETRIES` | `3` | Nombre de tentatives par appel LLM |
@@ -100,11 +101,15 @@ python main.py analyze -p "Test_Projet" -f ./test/sample_docs/description_system
 > export LOCAL_BASE_URL="http://$(ip route show default | awk '{print $3}'):1234/v1"
 > ```
 
-**Tool calling** : les modeles Qwen3 utilisent nativement le format Hermes de tool
-calling, pris en charge par le serveur LM Studio — garder `LLM_FUNCTION_CALLING=true`
-(defaut). En cas de souci avec un autre modele/serveur, relancer avec
-`LLM_FUNCTION_CALLING=false` : l'orchestrateur injecte de toute facon le contexte
-RAG dans chaque tache.
+**Recherche documentaire de l'Ingenieur** : le RAG est **pre-injecte dans chaque
+tache** (profondeur reglable via `RAG_TOP_K`, defaut 8). Les outils agentic
+(`search_rag`) sont **desactives par defaut** (`LLM_ENGINEER_TOOLS=false`) : la
+boucle d'outils en streaming s'est avere fragile avec certains templates LM Studio
+(appels re-emis en texte brut `<tool_call>` au lieu d'appels structures, production
+finale = XML). Re-activables via `LLM_ENGINEER_TOOLS=true` (la reflexion
+`reflect_on_tool_use=True` est alors appliquee automatiquement). La priorite des
+sources de l'Ingenieur est : feedback humain > template/tableau projet (donnees
+d'entree ou RAG) > donnees d'entree > structure par defaut > RAG generique.
 
 ### Performances en local (eviter les timeouts)
 

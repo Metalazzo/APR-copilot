@@ -32,7 +32,7 @@ A produire :
 Pour chaque element, indique ta source (document RAG ou hypothese explicite).
 Si le cadrage est incomplet, signale les informations manquantes.
 
-IMPORTANT : utilise l'outil search_rag pour rechercher dans la base documentaire avant de repondre.""",
+IMPORTANT : appuie-toi sur le contexte documentaire (RAG) fourni dans la tache avant de repondre.""",
         "reviewer_task": """Relis le cadrage produit par l'Ingenieur Technique et verifie :
 1. Toutes les rubriques attendues sont-elles renseignees ?
 2. Les sources sont-elles citees ?
@@ -76,7 +76,7 @@ Pour chaque item :
 - Justification courte et tracable
 - Lien avec le contexte du cadrage
 
-Utilise l'outil search_rag pour rechercher des informations pertinentes sur les agressions typiques.""",
+Appuie-toi sur le contexte documentaire (RAG) fourni pour les agressions typiques.""",
         "reviewer_task": """Relis le filtrage des agressions/menaces avec le regard du client/utilisateur final. Challenge :
 
 1. L'analyse reste-t-elle centree sur l'usage et l'integration prevus du produit, sans divergence du besoin client ?
@@ -113,8 +113,8 @@ Pour chaque scenario, produire un tableau structure avec :
 - Niveau de risque / criticite (provisoire)
 - Justification
 
-IMPORTANT : 
-- Utilise search_rag pour enrichir avec des scenarios types du domaine.
+IMPORTANT :
+- Appuie-toi sur le contexte documentaire (RAG) fourni pour les scenarios types du domaine.
 - Marque explicitement ton niveau de confiance par scenario.
 - Ne presente jamais comme certain un element non supporte par les documents.""",
         "reviewer_task": """Controle qualite des scenarios de risque generes :
@@ -155,7 +155,7 @@ Pour chaque barriere :
 - Efficacite attendue
 - Distinguer explicitement : barriere EXISTANTE (documentee) vs barriere RECOMMANDEE (proposee par l'agent)
 
-Utilise search_rag pour rechercher des barrieres types dans les referentiels du domaine.""",
+Appuie-toi sur le contexte documentaire (RAG) fourni pour les barrieres types.""",
         "reviewer_task": """Relis les barrieres proposees avec le regard du client/utilisateur final. Evalue :
 
 1. Les barrieres et l'analyse restent-elles centrees sur l'usage et l'integration prevus du produit, sans divergence du besoin client ?
@@ -341,10 +341,15 @@ class RiskAnalysisOrchestrator:
         if description:
             rag_query += f" {description}"
 
-        rag_chunks = retrieve(rag_query, top_k=5)
+        rag_chunks = retrieve(rag_query, top_k=app_config.rag.top_k)
         rag_context = format_retrieved_context(rag_chunks)
 
-        enriched_task = f"## Contexte documentaire (RAG)\n{rag_context}\n\n"
+        enriched_task = (
+            "## Contexte documentaire (RAG)\n"
+            "(Si un template/tableau/matrice d'analyse propre au projet figure "
+            "dans ces extraits, il prime sur le format par defaut de la tache.)\n\n"
+            f"{rag_context}\n\n"
+        )
         if description:
             enriched_task += (
                 f"## Description du systeme fournie par l'utilisateur (reference principale)\n"
@@ -366,10 +371,7 @@ class RiskAnalysisOrchestrator:
                 f"## FEEDBACK HUMAIN A INTEGRER (prioritaire, a suivre a la lettre)\n"
                 f"{human_feedback}\n\n"
             )
-        enriched_task += (
-            f"## Tache\n{step['task']}\n\n"
-            f"Tu peux aussi utiliser l'outil search_rag pour approfondir tes recherches."
-        )
+        enriched_task += f"## Tache\n{step['task']}"
         return await self._ask_agent(self.engineer, enriched_task)
 
     def _secretary_task(

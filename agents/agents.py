@@ -52,8 +52,16 @@ class EngineerAgent:
     def __init__(self, model_client: OpenAIChatCompletionClient):
         self.model_client = model_client
         system_message = _load_prompt("engineer")
-        # Streaming optionnel sur l'agent a outils : si le tool calling en
-        # streaming pose probleme avec un serveur, LLM_STREAM_ENGINEER=false.
+        # Outils DESACTIVES par defaut : avec certains templates/serveurs (LM
+        # Studio + streaming), la phase de reflexion post-outil re-emet les
+        # appels en texte brut <tool_call> au lieu d'appels structures, et la
+        # production finale devient du XML au lieu de l'analyse. Le RAG est
+        # pre-injecte par l'orchestrateur dans chaque tache. Re-activable via
+        # LLM_ENGINEER_TOOLS=true (reflect_on_tool_use=True est alors requis :
+        # defaut autogen 0.7 = False, la reponse serait le brut de l'outil).
+        use_tools = os.getenv("LLM_ENGINEER_TOOLS", "false").lower() in (
+            "1", "true", "yes",
+        )
         stream_engineer = os.getenv("LLM_STREAM_ENGINEER", "true").lower() in (
             "1", "true", "yes",
         )
@@ -62,7 +70,8 @@ class EngineerAgent:
             model_client=model_client,
             model_client_stream=stream_engineer,
             system_message=system_message,
-            tools=[_search_rag, _search_by_topic],
+            tools=[_search_rag, _search_by_topic] if use_tools else None,
+            reflect_on_tool_use=True if use_tools else None,
             description="Expert SDF/RAMS. Exécute les étapes 1-6: cadrage, extraction, filtrage, scénarios, cotation, barrières. Utilise search_rag pour chercher dans la base documentaire.",
         )
 
