@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.3.6] - 2026-09-02
+
+### Ameliore — GUI : popup de relecture/decision
+- Les checkpoints s'ouvrent desormais dans une **popup (dialog)** au lieu de
+  developper la carte du workflow (qui cassait la mise en page) : production et
+  relecture cote a cote dans des zones defilantes, avec les boutons de decision
+  (CONTINUER / QUITTER / feedback) directement dans la popup.
+- La popup se **ferme automatiquement** des que la decision est envoyee, puis le
+  workflow reprend.
+- Le bouton « Relecture / Validation » de chaque carte permet de rouvrir la popup
+  (consultation sans decision si aucun checkpoint en attente sur cette etape).
+- Badge de carte : « Checkpoint en attente » → « Validee » / « Interrompue ».
+- Notifications rendues robustes aux appels depuis la tache de l'orchestrateur
+  (fallback sur le journal).
+
+### Rollback
+- Etat pre-modification : commit `7ff8eea`
+
 ## [1.3.5] - 2026-09-02
 
 ### Corrige — cohérence des rôles

@@ -65,42 +65,81 @@ pending_checkpoint: dict = {}          # {"future": Future, "step_id": str}
 analysis_running: bool = False
 step_cards: dict[str, dict] = {}       # step_id -> elements UI
 log = None                             # ui.log, cree dans build_page()
+checkpoint_dialog = None               # ui.dialog, creee dans build_page()
 
 
 # ---------------------------------------------------------------------------
-# Handlers checkpoint
+# Handlers checkpoint (popup de relecture / decision)
 # ---------------------------------------------------------------------------
+
+def _safe_notify(message: str, type_: str = "info") -> None:
+    """ui.notify exige un contexte NiceGUI (slot) ; depuis une tache de fond
+    (orchestrateur) ce contexte peut manquer -> fallback sur le journal."""
+    try:
+        ui.notify(message, type=type_)
+    except RuntimeError:
+        log.push(f"[notif] {message}")
+
 
 async def gui_checkpoint(step_id: str, production: str, review: str, all_outputs: dict) -> str:
-    """human_callback : revele les boutons de la carte et attend la decision."""
+    """human_callback : ouvre la popup de relecture/decision et attend la decision."""
     loop = asyncio.get_running_loop()
     fut = loop.create_future()
     pending_checkpoint["future"] = fut
     pending_checkpoint["step_id"] = step_id
     card = step_cards[step_id]
-    card["checkpoint_box"].set_visibility(True)
-    log.push(f"[Checkpoint] {step_id} : CONTINUER / QUITTER / feedback")
-    ui.notify(f"Point de controle atteint : {step_id}", type="info")
+    card["badge"].set_text("Checkpoint en attente")
+    card["badge"].props("color=deep-orange")
+    log.push(f"[Checkpoint] {step_id} : decision requise dans la popup")
+    _safe_notify(f"Point de controle atteint : {step_id}")
+    _open_checkpoint_dialog(step_id)
     return await fut
 
 
-def resolve_checkpoint(step_id: str, value: str) -> None:
+def _open_checkpoint_dialog(step_id: str) -> None:
+    """Ouvre la popup pour l'etape donnee ; les boutons de decision ne sont
+    visibles que si un checkpoint est en attente sur CETTE etape."""
+    card = step_cards.get(step_id)
+    if card is None:
+        return
+    pending_here = (
+        pending_checkpoint.get("step_id") == step_id
+        and pending_checkpoint.get("future") is not None
+    )
+    dlg_title.set_text(f"Point de controle — {card['name']}")
+    dlg_prod_md.set_content(card.get("production_text") or "*Production non generee*")
+    dlg_review_md.set_content(card.get("review_text") or "*Aucune relecture*")
+    for btn in (btn_continue, btn_quit, btn_feedback):
+        btn.set_visibility(pending_here)
+    dlg_feedback.set_visibility(pending_here)
+    dlg_status.set_text(
+        "Decision attendue : CONTINUER, QUITTER, ou feedback — la popup se fermera "
+        "automatiquement une fois le choix envoye."
+        if pending_here
+        else "Consultation. Aucune decision en attente sur cette etape."
+    )
+    checkpoint_dialog.open()
+
+
+def decide(value: str) -> None:
+    """Resout le checkpoint en attente et ferme automatiquement la popup."""
     fut = pending_checkpoint.get("future")
     if fut is None or fut.done():
         return
+    step_id = pending_checkpoint.pop("step_id", None)
     pending_checkpoint.pop("future", None)
-    pending_checkpoint.pop("step_id", None)
-    step_cards[step_id]["checkpoint_box"].set_visibility(False)
+    checkpoint_dialog.close()
     fut.set_result(value)
     log.push(f">> Checkpoint {step_id} : {value[:80]}")
 
 
-def send_feedback(step_id: str) -> None:
-    text = (step_cards[step_id]["feedback_input"].value or "").strip()
+def send_feedback() -> None:
+    text = (dlg_feedback.value or "").strip()
     if not text:
         ui.notify("Saisissez un feedback (ou utilisez CONTINUER / QUITTER).", type="warning")
         return
-    resolve_checkpoint(step_id, text)
+    dlg_feedback.set_value("")
+    decide(text)
 
 
 # ---------------------------------------------------------------------------
@@ -117,11 +156,12 @@ async def on_progress(event: dict) -> None:
         log.push(f"=== {event['name']} ===")
     elif etype == "production" and card:
         card["prod_md"].set_content(event["text"])
+        card["production_text"] = event["text"]
         card["badge"].set_text("Production recue")
         card["badge"].props("color=teal")
         log.push(f"[{event['agent']}] production : {len(event['text'])} caracteres")
     elif etype == "review" and card:
-        card["review_md"].set_content(event["text"] or "*Aucune relecture*")
+        card["review_text"] = event["text"]
         log.push(f"[{event.get('reviewer')}] relecture : {len(event.get('text', ''))} caracteres")
     elif etype == "step_retry" and card:
         n = event.get("iteration", 1)
@@ -131,6 +171,14 @@ async def on_progress(event: dict) -> None:
     elif etype == "context_purged":
         log.push(f"[memoire] contexte purge ({event.get('size_before', '?')} messages)")
     elif etype == "checkpoint_answer":
+        answer = event.get("answer", "").upper().strip()
+        if card:
+            if answer == "CONTINUER":
+                card["badge"].set_text("Validee")
+                card["badge"].props("color=green")
+            elif answer == "QUITTER":
+                card["badge"].set_text("Interrompue")
+                card["badge"].props("color=red")
         log.push(f">> {event['step_id']} : {event['answer'][:80]}")
     elif etype == "done":
         log.push("=== Analyse terminee ===")
@@ -272,7 +320,8 @@ async def start_analysis():
         card["badge"].set_text("En attente")
         card["badge"].props("color=grey")
         card["prod_md"].set_content("*Production non generee*")
-        card["review_md"].set_content("*Aucune relecture*")
+        card["production_text"] = ""
+        card["review_text"] = ""
 
     analysis_running = True
     run_btn.disable()
@@ -318,6 +367,8 @@ def build_page() -> None:
     global log, mode_radio, local_base_url, local_model, local_api_key, local_temp, local_max_tokens
     global cloud_model, cloud_base_url, cloud_api_key, cloud_temp, cloud_max_tokens
     global function_calling_switch, timeout_input, retries_input, reasoning_select
+    global checkpoint_dialog, dlg_title, dlg_prod_md, dlg_review_md, dlg_status
+    global dlg_feedback, btn_continue, btn_quit, btn_feedback
     global ingest_dir, ingest_reset, ingest_btn, ingest_progress
     global project_input, context_input, run_btn, run_progress
 
@@ -462,42 +513,52 @@ def build_page() -> None:
                         "height: 220px; border-left: 3px solid #ddd; padding-left: 8px"
                     ):
                         prod_md = ui.markdown("*Production non generee*")
-                    with ui.expansion("Relecture", icon="rate_review").classes("w-full") as review_box:
-                        review_md = ui.markdown("*Aucune relecture*")
-                    with ui.card().classes("w-full").style(
-                        "border-left: 4px solid #f9a825"
-                    ) as checkpoint_box:
-                        ui.label("Point de controle humain").classes("text-subtitle1")
-                        feedback_input = ui.input(
-                            "Feedback a integrer (optionnel)"
-                        ).classes("w-full")
-                        with ui.row():
-                            ui.button(
-                                "CONTINUER",
-                                on_click=lambda s=step["id"]: resolve_checkpoint(s, "CONTINUER"),
-                            ).props("color=positive")
-                            ui.button(
-                                "QUITTER",
-                                on_click=lambda s=step["id"]: resolve_checkpoint(s, "QUITTER"),
-                            ).props("color=negative outline")
-                            ui.button(
-                                "Envoyer le feedback",
-                                on_click=lambda s=step["id"]: send_feedback(s),
-                            ).props("color=warning")
-                    checkpoint_box.set_visibility(False)
-
+                    ui.button(
+                        "Relecture / Validation",
+                        icon="rate_review",
+                        on_click=lambda s=step["id"]: _open_checkpoint_dialog(s),
+                    ).props("flat dense")
                     step_cards[step["id"]] = {
+                        "name": step["name"],
                         "badge": badge,
                         "prod_md": prod_md,
-                        "review_md": review_md,
-                        "review_box": review_box,
-                        "checkpoint_box": checkpoint_box,
-                        "feedback_input": feedback_input,
+                        "production_text": "",
+                        "review_text": "",
                     }
 
             log = ui.log(max_lines=500).classes("w-full").style("height: 200px")
             log.push("Astuce : cliquez sur le bouton refresh du modele local pour lister")
             log.push("les modeles charges sur le serveur LM Studio.")
+
+    # Popup de relecture / decision des checkpoints
+    with ui.dialog() as checkpoint_dialog:
+        with ui.card().style("width: 1100px; max-width: 96vw"):
+            dlg_title = ui.label("Point de controle").classes("text-h6")
+            with ui.row().classes("w-full items-stretch"):
+                with ui.column().classes("col grow"):
+                    ui.label("Production").classes("text-subtitle2 text-grey")
+                    with ui.scroll_area().style(
+                        "height: 45vh; border-left: 3px solid #1976d2; padding-left: 8px"
+                    ):
+                        dlg_prod_md = ui.markdown("")
+                with ui.column().classes("col grow"):
+                    ui.label("Relecture").classes("text-subtitle2 text-grey")
+                    with ui.scroll_area().style(
+                        "height: 45vh; border-left: 3px solid #f9a825; padding-left: 8px"
+                    ):
+                        dlg_review_md = ui.markdown("")
+            dlg_status = ui.label("").classes("text-caption text-grey")
+            dlg_feedback = ui.input("Feedback a integrer (optionnel)").classes("w-full")
+            with ui.row():
+                btn_continue = ui.button(
+                    "CONTINUER", on_click=lambda: decide("CONTINUER")
+                ).props("color=positive")
+                btn_quit = ui.button(
+                    "QUITTER", on_click=lambda: decide("QUITTER")
+                ).props("color=negative outline")
+                btn_feedback = ui.button(
+                    "Envoyer le feedback", on_click=send_feedback
+                ).props("color=warning")
 
     ui.label(
         "Outil local mono-utilisateur. Les livrables sont ecrits dans "
