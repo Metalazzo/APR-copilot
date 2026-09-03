@@ -170,6 +170,12 @@ async def on_progress(event: dict) -> None:
         log.push(f">> Feedback integre : re-generation #{n} de {event['step_id']}")
     elif etype == "context_purged":
         log.push(f"[memoire] contexte purge ({event.get('size_before', '?')} messages)")
+    elif etype == "context_truncated":
+        log.push(f"[contexte] TRONCATURE : {event.get('detail', '')}")
+        log.push(
+            f"[contexte] Des points risquent de sauter — augmentez la limite "
+            f"(actuellement {event.get('limit', '?')} caracteres)."
+        )
     elif etype == "web_search":
         if event.get("error"):
             log.push(f"[web] recherche indisponible : {event['error'][:80]}")
@@ -270,6 +276,7 @@ async def start_analysis():
     os.environ["WEB_SEARCH_BACKEND"] = str(web_backend.value or "ddg")
     os.environ["SEARXNG_URL"] = str(searxng_url_input.value or "")
     os.environ["TAVILY_API_KEY"] = str(tavily_key_input.value or "")
+    os.environ["STEP_CONTEXT_LIMIT"] = str(int(step_context_limit_input.value or 40000))
 
     def _local_profile() -> ModelProfile:
         return ModelProfile(
@@ -377,6 +384,7 @@ def build_page() -> None:
     global cloud_model, cloud_base_url, cloud_api_key, cloud_temp, cloud_max_tokens
     global function_calling_switch, timeout_input, retries_input, reasoning_select
     global web_search_switch, web_backend, searxng_url_input, tavily_key_input
+    global step_context_limit_input
     global checkpoint_dialog, dlg_title, dlg_prod_md, dlg_review_md, dlg_status
     global dlg_feedback, btn_continue, btn_quit, btn_feedback
     global ingest_dir, ingest_reset, ingest_btn, ingest_progress
@@ -488,9 +496,14 @@ def build_page() -> None:
                         format="%.0f", min=30,
                     ).props("label-always")
                     retries_input = ui.number(
-                        "Retries", value=float(os.getenv("LLM_MAX_RETRIES", "3")),
+                        "Retries", value=float(os.getenv("LLM_MAX_RETRIES", "1")),
                         format="%.0f", min=0,
                     ).props("label-always")
+                step_context_limit_input = ui.number(
+                    "Limite de contexte par etape precedente (caracteres)",
+                    value=float(os.getenv("STEP_CONTEXT_LIMIT", "40000")),
+                    format="%.0f", min=1000,
+                ).props("label-always").classes("w-full")
 
             with ui.card().classes("w-full"):
                 ui.label("Base documentaire (RAG)").classes("text-subtitle1")

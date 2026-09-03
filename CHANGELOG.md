@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.3.9] - 2026-09-03
+
+### Ameliore — marges de contexte et visibilite des troncatures
+- `STEP_CONTEXT_LIMIT` 20000 -> **40000** caracteres par etape precedente
+  (un modele verbeux peut produire 15-40k caracteres ; 105k de contexte
+  absorbe largement 4 x 40000).
+- **Toute troncature est desormais visible** : message console + evenement GUI
+  « productions tronquees : X (-N car.) » avec conseil d'augmentation — avant,
+  le marqueur n'existait que dans le prompt injecte, invisible pour l'utilisateur.
+- GUI : champ « Limite de contexte par etape precedente » dans Parametres
+  avances ; defaut retries aligne sur 1 (orchestrateur).
+- `_previous_outputs_section` et `_secretary_task` passees en async (emission
+  des alertes).
+
+### Rollback
+- Etat pre-modification : commit `74e869a`
+
 ## [1.3.8] - 2026-09-03
 
 ### Ajout — etat de l'art

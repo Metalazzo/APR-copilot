@@ -264,15 +264,16 @@ class RiskAnalysisOrchestrator:
     def _step_context_limit(self) -> int:
         """Limite de caracteres par etape precedente reinjectee dans une tache.
 
-        Reglable via STEP_CONTEXT_LIMIT (defaut 20000). Avec un modele local a
-        grand contexte (100k+), 6000 tronquait les productions et faisait perdre
-        des points dans le livrable final."""
-        return int(os.getenv("STEP_CONTEXT_LIMIT", "20000"))
+        Reglable via STEP_CONTEXT_LIMIT (defaut 40000). Toute troncature est
+        signalee en log/GUI : si elle survient, augmenter la limite (un modele
+        a 100k+ tokens de contexte absorbe largement 4 x 40000)."""
+        return int(os.getenv("STEP_CONTEXT_LIMIT", "40000"))
 
-    def _previous_outputs_section(self, exclude_step_id: str = "") -> str:
+    async def _previous_outputs_section(self, exclude_step_id: str = "") -> str:
         """Assemble les productions des etapes deja realisees pour le contexte."""
         limit = self._step_context_limit()
         parts = []
+        truncated = []
         for done_step in WORKFLOW_STEPS:
             if done_step["id"] == exclude_step_id:
                 continue
@@ -282,7 +283,22 @@ class RiskAnalysisOrchestrator:
             trimmed = out[:limit]
             if len(out) > limit:
                 trimmed += "\n[... tronque ...]"
+                truncated.append((done_step["id"], len(out) - limit))
             parts.append(f"### {done_step['name']}\n{trimmed}")
+        if truncated:
+            detail = ", ".join(f"{sid} (-{lost} car.)" for sid, lost in truncated)
+            msg = (
+                f"[contexte] productions tronquees : {detail} — "
+                f"des points risquent de sauter. Augmentez STEP_CONTEXT_LIMIT "
+                f"(actuellement {limit})."
+            )
+            print(msg)
+            await self._emit({
+                "type": "context_truncated",
+                "step_id": exclude_step_id or "livraison",
+                "detail": detail,
+                "limit": limit,
+            })
         if not parts:
             return ""
         return "\n\n".join(parts)
@@ -431,7 +447,7 @@ class RiskAnalysisOrchestrator:
                 f"## Description du systeme fournie par l'utilisateur (reference principale)\n"
                 f"{description[:8000]}\n\n"
             )
-        previous = self._previous_outputs_section(exclude_step_id=step["id"])
+        previous = await self._previous_outputs_section(exclude_step_id=step["id"])
         if previous:
             enriched_task += (
                 f"## Travaux precedents de l'analyse (a respecter et prolonger)\n"
@@ -450,7 +466,7 @@ class RiskAnalysisOrchestrator:
         enriched_task += f"## Tache\n{step['task']}"
         return await self._ask_agent(self.engineer, enriched_task)
 
-    def _secretary_task(
+    async def _secretary_task(
         self,
         step: dict,
         human_feedback: str = "",
@@ -476,7 +492,8 @@ class RiskAnalysisOrchestrator:
                 f"\n\n## FEEDBACK HUMAIN A INTEGRER (prioritaire, a suivre a la lettre)\n"
                 f"{human_feedback}"
             )
-        previous = self._previous_outputs_section(exclude_step_id=step["id"])
+        previous = await self._previous_outputs_section(exclude_step_id=step["id"])
+
         if previous:
             task += (
                 f"\n\n## Travaux precedents de l'analyse (source unique de verite)\n"
@@ -555,7 +572,7 @@ class RiskAnalysisOrchestrator:
                         production = await self._run_engineer_step(step)
                     else:
                         production = await self._ask_agent(
-                            self.secretary, self._secretary_task(step)
+                            self.secretary, await self._secretary_task(step)
                         )
                 else:
                     await self._emit({
@@ -574,7 +591,7 @@ class RiskAnalysisOrchestrator:
                     else:
                         production = await self._ask_agent(
                             self.secretary,
-                            self._secretary_task(
+                            await self._secretary_task(
                                 step,
                                 human_feedback=self._feedback_section(feedbacks),
                                 previous_production=production,

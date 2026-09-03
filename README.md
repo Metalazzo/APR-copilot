@@ -57,7 +57,7 @@ Variables d'environnement (ou modifier `config.py`) :
 | `LLM_FUNCTION_CALLING` | `true` | Mettre `false` si le serveur ne supporte pas le tool calling |
 | `LLM_ENGINEER_TOOLS` | `false` | Outils agentic (`search_rag`) de l'Ingenieur : desactives par defaut (le RAG est pre-injecte dans chaque tache). `true` pour re-activer la boucle d'outils |
 | `LLM_REASONING` | `off` | Niveau de raisonnement injecte au message systeme : `off`/`low`/`medium`/`high`/`xhigh` (jetons interpretes par le template Jinja du modele) |
-| `STEP_CONTEXT_LIMIT` | `20000` | Caracteres max par etape precedente reinjectee dans une tache (avant : 6000, causait des pertes de points dans le livrable) |
+| `STEP_CONTEXT_LIMIT` | `40000` | Caracteres max par etape precedente reinjectee dans une tache (toute troncature est signalee en log/GUI ; augmenter si alerte) |
 | `WEB_SEARCH_ENABLED` | `false` | Recherche web orchestree (etat de l'art) injectee dans les taches de l'Ingenieur. Confidentialite : les requetes partent vers l'exterieur |
 | `WEB_SEARCH_BACKEND` | `ddg` | `ddg` (sans cle) / `searxng` (auto-heberge, anonymise) / `tavily` (cle cloud) |
 | `WEB_SEARCH_MAX_RESULTS` | `5` | Nombre de resultats web injectes par etape |
