@@ -128,7 +128,7 @@ class SecretaryAgent:
             model_client=model_client,
             model_client_stream=True,
             system_message=system_message,
-            description="Mise en forme et restitution. Assemble les 4 blocs, formate en Markdown/CSV/JSON, vérifie conformité template.",
+            description="Mise en forme et restitution. Assemble les 5 sections du livrable (resume executif et gouvernance RACI, filtrage, APR avec traitement, plan de traitement et decisions d'acceptation, points ouverts), formate en Markdown/CSV/JSON, vérifie conformité template.",
         )
 
     @property

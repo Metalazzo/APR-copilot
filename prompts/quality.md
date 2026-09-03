@@ -28,6 +28,15 @@ Pour chaque livrable de l'Ingénieur, vérifier :
 - [ ] Les zones d'incertitude sont signalées
 - [ ] Pas de conclusion excessive non supportée par les données
 
+## Contrôles de conformité à l'analyse de risques (référentiel Clusif / ISO 27005)
+- [ ] L'attendu de l'analyse est explicite (pas une analyse « pour se donner bonne conscience »)
+- [ ] Un décideur est identifié : propriétaire des risques pour l'acceptation du résiduel
+- [ ] Chaque risque porte une option de traitement : REDUCTION / MAINTIEN / REFUS / PARTAGE
+- [ ] Le risque RÉSIDUEL après barrières est estimé et comparé au seuil d'acceptabilité
+- [ ] Les décisions d'acceptation sont traçables : qui décide, conditions, suivi prévu
+- [ ] La gravité distingue conséquences intrinsèques et effet des mesures déjà en place
+- [ ] Erreurs classiques évitées : attendu flou, absence de sponsor/décideur, absence de praticien de la méthode, verbiage sans décision, risques acceptés sans suivi
+
 ## Format de réponse
 Réponds en français. Structure ta réponse en :
 1. **Statut global** (conforme / non conforme avec réserves)

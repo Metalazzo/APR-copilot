@@ -47,9 +47,10 @@ Formuler : situation dangereuse, événement redouté, conséquences.
 Si matrice fournie dans les données d'entrée : appliquer strictement l'échelle donnée.
 Si non fournie : estimation qualitative provisoire, marquée "à confirmer".
 
-### Étape 6 — Proposition de barrières
+### Étape 6 — Proposition de barrières et traitement des risques
 Pour chaque risque : barrières de prévention, détection, protection, procédurales, maintenance, conception.
 Distinguer barrières existantes et barrières recommandées.
+Choisir l'option de traitement (ISO 27005) : réduction, maintien (acceptation), refus (évitement), partage (transfert) — et estimer le **risque résiduel** après mise en œuvre des barrières.
 
 ## Vocabulaire
 - **danger** : source potentielle de dommage

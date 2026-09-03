@@ -145,9 +145,15 @@ Reponds avec :
         "reviewer": "client",
         "checkpoint": 4,
         "query_hint": "barrières de sécurité prévention protection exemples systèmes électriques",
-        "task": """Pour chaque scenario de risque identifie, propose des barrieres de reduction du risque.
+        "task": """Pour chaque scenario de risque identifie, choisis l'option de traitement du risque (ISO 27005) et propose les barrieres de reduction si retenue.
 
-Categories de barrieres a couvrir :
+Options de traitement (une par risque) :
+- REDUCTION : ajout/suppression/modification de barrieres jusqu'a un risque residuel acceptable
+- MAINTIEN (acceptation) : aucune autre action, le risque est accepte tel quel
+- REFUS (evitement) : suppression de la source du risque (arreter ou modifier l'activite)
+- PARTAGE (transfert) : assurance, sous-traitance, clause contractuelle vers une partie capable de gerer le risque
+
+Categories de barrieres a couvrir (pour l'option REDUCTION) :
 1. Barrieres techniques electroniques (redondance, surveillance, watchdog, isolation)
 2. Barrieres techniques mecaniques (capots, blindages, butees, dispositifs de securite)
 3. Barrieres logicielles (controles de coherence, modes degrades, securites programmees)
@@ -159,6 +165,10 @@ Pour chaque barriere :
 - Description de la barriere
 - Efficacite attendue
 - Distinguer explicitement : barriere EXISTANTE (documentee) vs barriere RECOMMANDEE (proposee par l'agent)
+
+Puis, pour chaque risque :
+- Option de traitement retenue (REDUCTION / MAINTIEN / REFUS / PARTAGE) + justification courte
+- Risque RESIDUEL estime apres mise en oeuvre des barrieres (grille fournie ; marquer "a confirmer" si incertain)
 
 Appuie-toi sur le contexte documentaire (RAG) fourni pour les barrieres types.""",
         "reviewer_task": """Relis les barrieres proposees avec le regard du client/utilisateur final. Evalue :
@@ -184,23 +194,37 @@ Reponds avec :
         "agent": "secretary",
         "reviewer": None,
         "checkpoint": None,
-        "task": """Assemble l'analyse complete en 4 blocs selon le format standard.
+        "task": """Assemble l'analyse complete en 5 sections selon le format standard.
 
 Produis le document final structure comme suit :
 
 ---
 # ANALYSE PRELIMINAIRE DE RISQUE
 
-## Bloc 1 - Resume executif
+## Bloc 1 - Resume executif et gouvernance
 [Objet, perimetre, principales hypotheses, niveau de confiance global]
+[Tableau RACI de la demarche :
+- A (Approuve, proprietaire des risques) : decision finale d'acceptation - humain validateur
+- R (Realise) : Ingenieur Technique SDF
+- C (Consulte) : Animateur Qualite, Representant Client
+- I (Informe) : Secretaire / livrable]
 
 ## Bloc 2 - Filtrage des agressions et menaces
 [Tableau : item | statut | justification | point a valider]
 
 ## Bloc 3 - Analyse preliminaire de risque
-[Tableau structure avec toutes les colonnes requises]
+[Tableau structure avec toutes les colonnes requises, incluant pour chaque risque
+l'option de traitement (REDUCTION / MAINTIEN / REFUS / PARTAGE) et le risque residuel]
 
-## Bloc 4 - Points ouverts pour validation humaine
+## Bloc 4 - Plan de traitement et decisions d'acceptation
+[Pour chaque risque non reduit a un niveau acceptable :
+- Option de traitement (REDUCTION / MAINTIEN / REFUS / PARTAGE)
+- Mesures et conditions d'execution
+- Decision requise : QUI doit accepter (proprietaire des risques), a quel niveau
+- Conditions d'acceptation eventuelles (duree, en attendant une action...)
+- Suivi prevu (revue periodique)]
+
+## Bloc 5 - Points ouverts pour validation humaine
 [Liste priorisee : ambiguites, hypotheses critiques, elements manquants, decisions attendues]
 ---
 
