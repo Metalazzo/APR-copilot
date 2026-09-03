@@ -170,6 +170,11 @@ async def on_progress(event: dict) -> None:
         log.push(f">> Feedback integre : re-generation #{n} de {event['step_id']}")
     elif etype == "context_purged":
         log.push(f"[memoire] contexte purge ({event.get('size_before', '?')} messages)")
+    elif etype == "web_search":
+        if event.get("error"):
+            log.push(f"[web] recherche indisponible : {event['error'][:80]}")
+        else:
+            log.push(f"[web] '{event.get('query', '')[:60]}' : {event.get('count', 0)} resultats")
     elif etype == "checkpoint_answer":
         answer = event.get("answer", "").upper().strip()
         if card:
@@ -261,6 +266,10 @@ async def start_analysis():
     os.environ["LLM_TIMEOUT"] = str(int(timeout_input.value or 1800))
     os.environ["LLM_MAX_RETRIES"] = str(int(retries_input.value or 1))
     os.environ["LLM_REASONING"] = str(reasoning_select.value or "off")
+    os.environ["WEB_SEARCH_ENABLED"] = "true" if web_search_switch.value else "false"
+    os.environ["WEB_SEARCH_BACKEND"] = str(web_backend.value or "ddg")
+    os.environ["SEARXNG_URL"] = str(searxng_url_input.value or "")
+    os.environ["TAVILY_API_KEY"] = str(tavily_key_input.value or "")
 
     def _local_profile() -> ModelProfile:
         return ModelProfile(
@@ -367,6 +376,7 @@ def build_page() -> None:
     global log, mode_radio, local_base_url, local_model, local_api_key, local_temp, local_max_tokens
     global cloud_model, cloud_base_url, cloud_api_key, cloud_temp, cloud_max_tokens
     global function_calling_switch, timeout_input, retries_input, reasoning_select
+    global web_search_switch, web_backend, searxng_url_input, tavily_key_input
     global checkpoint_dialog, dlg_title, dlg_prod_md, dlg_review_md, dlg_status
     global dlg_feedback, btn_continue, btn_quit, btn_feedback
     global ingest_dir, ingest_reset, ingest_btn, ingest_progress
@@ -452,6 +462,24 @@ def build_page() -> None:
                     },
                     value=os.getenv("LLM_REASONING", "off"),
                     label="Niveau de raisonnement",
+                ).classes("w-full")
+                web_search_switch = ui.switch(
+                    "Recherche web (etat de l'art)", value=False
+                )
+                web_backend = ui.select(
+                    {
+                        "ddg": "DuckDuckGo (sans cle)",
+                        "searxng": "SearXNG (auto-heberge)",
+                        "tavily": "Tavily (cle cloud)",
+                    },
+                    value=os.getenv("WEB_SEARCH_BACKEND", "ddg"),
+                    label="Backend de recherche",
+                ).classes("w-full")
+                searxng_url_input = ui.input(
+                    "URL SearXNG", value=os.getenv("SEARXNG_URL", "")
+                ).classes("w-full")
+                tavily_key_input = ui.input(
+                    "Cle Tavily", value=os.getenv("TAVILY_API_KEY", ""), password=True
                 ).classes("w-full")
                 with ui.row().classes("w-full items-center"):
                     timeout_input = ui.number(

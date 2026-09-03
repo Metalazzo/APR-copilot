@@ -1,3 +1,4 @@
+import asyncio
 import os
 from dataclasses import dataclass, field
 from typing import Optional, Callable, Awaitable
@@ -17,6 +18,7 @@ WORKFLOW_STEPS = [
         "agent": "engineer",
         "reviewer": "quality",
         "checkpoint": 1,
+        "query_hint": "méthode analyse préliminaire de risque APR industrielle",
         "task": """Effectue le cadrage de l'analyse de risque en te basant sur les documents RAG fournis.
 
 A produire :
@@ -52,6 +54,7 @@ Reponds avec :
         "agent": "engineer",
         "reviewer": "client",
         "checkpoint": 2,
+        "query_hint": "agressions environnementales électriques systèmes électriques ferroviaires",
         "task": """Effectue le filtrage des agressions et menaces generiques applicables au systeme.
 
 Categories d'agressions a evaluer :
@@ -97,6 +100,7 @@ Reponds avec :
         "agent": "engineer",
         "reviewer": "quality",
         "checkpoint": 3,
+        "query_hint": "scénarios de risque situations dangereuses exemples systèmes électriques",
         "task": """Genere les scenarios de risque en croisant les fonctions/elements avec les agressions/menaces applicables.
 
 Pour chaque scenario, produire un tableau structure avec :
@@ -140,6 +144,7 @@ Reponds avec :
         "agent": "engineer",
         "reviewer": "client",
         "checkpoint": 4,
+        "query_hint": "barrières de sécurité prévention protection exemples systèmes électriques",
         "task": """Pour chaque scenario de risque identifie, propose des barrieres de reduction du risque.
 
 Categories de barrieres a couvrir :
@@ -256,10 +261,17 @@ class RiskAnalysisOrchestrator:
             return str(messages[-1].content)
         return ""
 
-    PREVIOUS_OUTPUT_LIMIT = 6000  # caracteres max par etape precedente reinjectee
+    def _step_context_limit(self) -> int:
+        """Limite de caracteres par etape precedente reinjectee dans une tache.
+
+        Reglable via STEP_CONTEXT_LIMIT (defaut 20000). Avec un modele local a
+        grand contexte (100k+), 6000 tronquait les productions et faisait perdre
+        des points dans le livrable final."""
+        return int(os.getenv("STEP_CONTEXT_LIMIT", "20000"))
 
     def _previous_outputs_section(self, exclude_step_id: str = "") -> str:
         """Assemble les productions des etapes deja realisees pour le contexte."""
+        limit = self._step_context_limit()
         parts = []
         for done_step in WORKFLOW_STEPS:
             if done_step["id"] == exclude_step_id:
@@ -267,8 +279,8 @@ class RiskAnalysisOrchestrator:
             out = self.state.outputs.get(done_step["id"])
             if not out:
                 continue
-            trimmed = out[: self.PREVIOUS_OUTPUT_LIMIT]
-            if len(out) > self.PREVIOUS_OUTPUT_LIMIT:
+            trimmed = out[:limit]
+            if len(out) > limit:
                 trimmed += "\n[... tronque ...]"
             parts.append(f"### {done_step['name']}\n{trimmed}")
         if not parts:
@@ -330,6 +342,66 @@ class RiskAnalysisOrchestrator:
             f"tous a respecter)\n{lines}"
         )
 
+    @staticmethod
+    def _keywords(text: str, n: int = 4) -> str:
+        """Extrait n mots-cles significatifs d'un texte (sans LLM)."""
+        import re
+        stopwords = {
+            "apres", "entre", "leur", "elle", "nous", "vous", "ainsi", "etre",
+            "avoir", "cette", "dont", "chez", "comme", "aussi", "tres", "alors",
+            "donc", "mais", "tout", "toute", "tous", "ces", "ses", "son", "sa",
+            "plus", "moins", "chaque", "pour", "avec", "dans", "sont", "est",
+            "une", "les", "des", "aux", "que", "qui", "par", "sur", "indicator",
+        }
+        words = re.findall(r"[a-zA-ZÀ-ÿ]{5,}", (text or "").lower())
+        freq: dict = {}
+        for w in words:
+            if w not in stopwords:
+                freq[w] = freq.get(w, 0) + 1
+        return " ".join(sorted(freq, key=freq.get, reverse=True)[:n])
+
+    async def _web_section(self, step: dict) -> str:
+        """Recherche web orchestree (etat de l'art), desactivee par defaut.
+
+        Le LLM n'appelle jamais d'outil : l'orchestrateur cherche AVANT de
+        construire la tache et injecte les resultats comme contexte. Tout
+        echec est non bloquant (section omise, log)."""
+        if os.getenv("WEB_SEARCH_ENABLED", "false").lower() not in ("1", "true", "yes"):
+            return ""
+        if step["agent"] != "engineer":
+            return ""
+
+        from web_search import get_web_config, search_web
+        cfg = get_web_config()
+        hint = step.get("query_hint") or step["id"]
+        keywords = self._keywords(self.state.analysis_state.system_description or "")
+        query = f"{hint} {keywords}".strip()
+
+        try:
+            results = await asyncio.to_thread(search_web, query)
+        except Exception as exc:
+            print(f"[web] recherche indisponible ({cfg.backend}) : {exc}")
+            await self._emit({
+                "type": "web_search", "step_id": step["id"],
+                "query": query, "count": 0, "error": str(exc)[:200],
+            })
+            return ""
+
+        await self._emit({
+            "type": "web_search", "step_id": step["id"],
+            "query": query, "count": len(results),
+        })
+        if not results:
+            return ""
+        lines = [f"- [{r['title']}]({r['url']}) : {r['snippet']}" for r in results]
+        return (
+            "## Etat de l'art — references web (NON VERIFIEES)\n"
+            f"Requete : {query}\n" + "\n".join(lines) +
+            "\n⚠️ Sources web publiques, non verifiees : pistes de reflexion "
+            "uniquement, jamais une reference normative. A citer avec prudence "
+            "et a faire valider par l'humain."
+        )
+
     async def _run_engineer_step(
         self,
         step: dict,
@@ -344,12 +416,16 @@ class RiskAnalysisOrchestrator:
         rag_chunks = retrieve(rag_query, top_k=app_config.rag.top_k)
         rag_context = format_retrieved_context(rag_chunks)
 
+        web_section = await self._web_section(step)
+
         enriched_task = (
             "## Contexte documentaire (RAG)\n"
             "(Si un template/tableau/matrice d'analyse propre au projet figure "
             "dans ces extraits, il prime sur le format par defaut de la tache.)\n\n"
             f"{rag_context}\n\n"
         )
+        if web_section:
+            enriched_task += f"{web_section}\n\n"
         if description:
             enriched_task += (
                 f"## Description du systeme fournie par l'utilisateur (reference principale)\n"
@@ -364,7 +440,7 @@ class RiskAnalysisOrchestrator:
         if previous_production:
             enriched_task += (
                 f"## Production precedente de cette etape (A CORRIGER selon le feedback)\n"
-                f"{previous_production[:4000]}\n\n"
+                f"{previous_production[: self._step_context_limit()]}\n\n"
             )
         if human_feedback:
             enriched_task += (
@@ -393,7 +469,7 @@ class RiskAnalysisOrchestrator:
         if previous_production:
             task += (
                 f"\n\n## Version precedente du document (A CORRIGER selon le feedback)\n"
-                f"{previous_production[:4000]}"
+                f"{previous_production[: self._step_context_limit()]}"
             )
         if human_feedback:
             task += (

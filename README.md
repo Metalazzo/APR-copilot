@@ -57,6 +57,12 @@ Variables d'environnement (ou modifier `config.py`) :
 | `LLM_FUNCTION_CALLING` | `true` | Mettre `false` si le serveur ne supporte pas le tool calling |
 | `LLM_ENGINEER_TOOLS` | `false` | Outils agentic (`search_rag`) de l'Ingenieur : desactives par defaut (le RAG est pre-injecte dans chaque tache). `true` pour re-activer la boucle d'outils |
 | `LLM_REASONING` | `off` | Niveau de raisonnement injecte au message systeme : `off`/`low`/`medium`/`high`/`xhigh` (jetons interpretes par le template Jinja du modele) |
+| `STEP_CONTEXT_LIMIT` | `20000` | Caracteres max par etape precedente reinjectee dans une tache (avant : 6000, causait des pertes de points dans le livrable) |
+| `WEB_SEARCH_ENABLED` | `false` | Recherche web orchestree (etat de l'art) injectee dans les taches de l'Ingenieur. Confidentialite : les requetes partent vers l'exterieur |
+| `WEB_SEARCH_BACKEND` | `ddg` | `ddg` (sans cle) / `searxng` (auto-heberge, anonymise) / `tavily` (cle cloud) |
+| `WEB_SEARCH_MAX_RESULTS` | `5` | Nombre de resultats web injectes par etape |
+| `SEARXNG_URL` | — | URL de l'instance SearXNG (`search.formats` avec `json` active) |
+| `TAVILY_API_KEY` | — | Cle API Tavily (si backend tavily) |
 | `LLM_TIMEOUT` | `600` | Timeout (secondes) par appel LLM — valeur large conseillee en local |
 | `LLM_MAX_RETRIES` | `3` | Nombre de tentatives par appel LLM |
 
@@ -132,6 +138,32 @@ un timeout de 1800 s par requete et 1 retry.
   tout ralentit.
 
 ## Utilisation
+
+### Socle de référence (état de l'art) dans le RAG
+
+Placez vos documents de référence (extraits publics de normes, guides, REX, articles)
+dans un sous-dossier du répertoire indexé (ex. `test/references/`) puis ré-indexez :
+
+```bash
+python main.py ingest test --reset
+```
+
+Les normes complètes sont payantes (AFNOR/IEC) : le web ne donnera que des résumés —
+vos documents propriétaires restent la meilleure source. Le nettoyage PDF
+(headers/footers) et la fusion des micro-chunks s'appliquent automatiquement.
+
+### Recherche web (état de l'art) — optionnelle
+
+L'orchestrateur peut compléter le RAG d'une recherche web par étape de l'Ingénieur
+(les résultats sont injectés comme contexte **NON VÉRIFIÉ**, avec bandeau de réserve).
+Désactivé par défaut (les requêtes partent vers l'extérieur) :
+
+- **GUI** : switch « Recherche web » + backend dans *Paramètres avancés*
+- **CLI** : `WEB_SEARCH_ENABLED=true`, `WEB_SEARCH_BACKEND=ddg|searxng|tavily`
+
+Pour un usage intensif, préférez un **SearXNG auto-hébergé** (anonymisation) :
+`docker run -p 8888:8080 searxng/searxng` avec `json` ajouté à `search.formats`
+dans `settings.yml`, puis `SEARXNG_URL=http://localhost:8888`.
 
 ### Lancement rapide (interface graphique)
 

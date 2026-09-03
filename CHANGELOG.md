@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.3.8] - 2026-09-03
+
+### Ajout — etat de l'art
+- **Recherche web orchestree** (module `web_search.py`) : l'orchestrateur cherche
+  AVANT de construire la tache et injecte les resultats comme contexte
+  « NON VERIFIE » — le LLM n'appelle jamais d'outil (pattern fiable v1.3.7).
+  Backends : DuckDuckGo (sans cle, via `ddgs`), SearXNG auto-heberge, Tavily.
+  Desactive par defaut (`WEB_SEARCH_ENABLED=false`) — confidentialite.
+  GUI : switch + backend + champs dans Parametres avances ; log par recherche.
+- **Requetes par etape** : champ `query_hint` dans le workflow + extraction
+  naive de mots-cles de la description systeme (sans appel LLM).
+- README : socle de reference RAG (dossier `references/`) + doc recherche web.
+
+### Corrige — pertes de points dans le livrable
+- `STEP_CONTEXT_LIMIT` 6000 -> **20000** caracteres (reglable) : les productions
+  des etapes precedentes etaient tronquees avant d'atteindre le Secretaire,
+  d'ou des points sautes/tronques dans le livrable final. Avec un modele a
+  grand contexte (100k+), l'injection integrale est desormais possible.
+- Re-generations : injection de la production precedente passee de 4000 a la
+  meme limite configurables.
+- Export JSON : contenu **integral** des etapes (audit des pertes possible).
+
 ## [1.3.7] - 2026-09-02
 
 ### Corrige — Ingenieur produisant du vide / du brut aux etapes avec outils

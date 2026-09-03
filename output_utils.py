@@ -32,7 +32,9 @@ def save_analysis_outputs(
         json.dumps(
             {
                 "project": project,
-                "steps": {k: str(v)[:5000] for k, v in outputs.items()},
+                # Contenu integral : sert d'audit (verifier qu'aucun point n'a
+                # saute entre les etapes et le livrable final).
+                "steps": {k: str(v) for k, v in outputs.items()},
             },
             indent=2,
             ensure_ascii=False,
