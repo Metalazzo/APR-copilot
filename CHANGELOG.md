@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.3.12] - 2026-09-05
+
+### Ameliore — semantique explicite de la check-list de checkpoint
+- Les toggles OK/KO ambigus sont remplaces par une qualification a 3 etats
+  explicites par point de la relecture : **« A corriger »** (le probleme est
+  reel, declenche une re-generation), **« Sans objet »** et **« Deja traite »**
+  (pas de correction, decisions tracees dans le livrable).
+- **Lien versions V1…Vn** : le titre de la popup affiche la version validee
+  (« version V1 », V2 apres re-generation…), et le feedback compose est
+  pre-fixe « (version Vn) » pour tracer quelle production est jugee.
+- Nouvelle branche orchestrateur : un feedback commencant par
+  « SANS CORRECTION » valide l'etape et trace les decisions **sans
+  re-generation** (cas ou l'humain qualifie tous les points de la relecture
+  en Sans objet / Deja traite).
+- Composition du feedback : [A CORRIGER] / [SANS OBJET] / [DEJA TRAITE] +
+  detail + commentaire global, avec version.
+
 ## [1.3.11] - 2026-09-05
 
 ### Ameliore — GUI : popup de checkpoint plus pratique

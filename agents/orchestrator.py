@@ -697,6 +697,16 @@ class RiskAnalysisOrchestrator:
                     interrupted = True
                     break
 
+                if feedback.strip().upper().startswith("SANS CORRECTION"):
+                    # Points de la relecture qualifies par l'humain en
+                    # 'Sans objet' / 'Deja traite' : rien a corriger, l'etape
+                    # est validee et les decisions sont tracees.
+                    self.state.human_validations[step["id"]] = (
+                        self._feedback_section(feedbacks + [feedback])
+                    )
+                    print(">> Etape validee (points de la relecture qualifies, sans correction).")
+                    break
+
                 feedbacks.append(feedback)
                 self.state.human_validations[step["id"]] = feedback
                 iteration += 1

@@ -147,34 +147,45 @@ def _open_checkpoint_dialog(step_id: str) -> None:
         pending_checkpoint.get("step_id") == step_id
         and pending_checkpoint.get("future") is not None
     )
-    dlg_title.set_text(f"Point de controle — {card['name']}")
+    version = int(card.get("iteration", 0)) + 1  # V1 = premiere production, V2 = 1re re-generation...
+    dlg_title.set_text(f"Point de contrôle — {card['name']} — version V{version}")
     dlg_prod_md.set_content(card.get("production_text") or "*Production non generee*")
     dlg_review_md.set_content(card.get("review_text") or "*Aucune relecture*")
 
-    # Check-list OK/KO detail, construite depuis les points de la relecture
+    # Qualification des points souleves par la relecture (semantique explicite)
     dlg_points_container.clear()
     checklist_rows.clear()
     if pending_here:
         points = _parse_review_points(card.get("review_text") or "")
         with dlg_points_container:
             if points:
-                ui.label("Points a valider (extraits de la relecture) :").classes(
+                ui.label("Points soulevés par la relecture — qualifiez chacun :").classes(
                     "text-subtitle2"
                 )
+                ui.label(
+                    "« À corriger » = le problème est réel, déclenche une re-génération. "
+                    "« Sans objet » / « Déjà traité » = pas de correction ; c'est tracé "
+                    "dans le livrable sans re-génération."
+                ).classes("text-caption text-grey")
                 with ui.scroll_area().style(
                     "height: 16vh; border-left: 3px solid #ddd; padding-left: 8px"
                 ):
                     for pt in points:
                         with ui.row().classes("w-full items-center no-wrap"):
-                            tog = ui.toggle(["OK", "KO"], clearable=True).props(
-                                "dense size=sm"
-                            )
+                            tog = ui.toggle(
+                                {
+                                    "corriger": "À corriger",
+                                    "sans_objet": "Sans objet",
+                                    "deja_traite": "Déjà traité",
+                                },
+                                clearable=True,
+                            ).props("dense")
                             ui.label(pt).classes(
                                 "grow text-caption"
                             ).style(
                                 "overflow: hidden; text-overflow: ellipsis; white-space: nowrap"
                             )
-                            det = ui.input(placeholder="detail (si KO)").props(
+                            det = ui.input(placeholder="detail / justification").props(
                                 "dense outlined"
                             ).style("width: 300px")
                         checklist_rows.append(
@@ -191,12 +202,13 @@ def _open_checkpoint_dialog(step_id: str) -> None:
     dlg_feedback.set_visibility(pending_here)
     dlg_points_container.set_visibility(pending_here)
     dlg_status.set_text(
-        "Decision attendue : marquez les points OK/KO avec un detail, ajoutez un "
-        "feedback global si besoin — la popup se fermera automatiquement une fois "
-        "le choix envoye."
+        f"Version validée : V{version}. Qualifiez les points ci-dessus, ou "
+        "CONTINUER / QUITTER — la popup se ferme automatiquement après envoi."
         if pending_here
         else "Consultation. Aucune decision en attente sur cette etape."
     )
+    if pending_here:
+        pending_checkpoint["version"] = version
     checkpoint_dialog.open()
 
 
@@ -207,6 +219,7 @@ def decide(value: str) -> None:
         return
     step_id = pending_checkpoint.pop("step_id", None)
     pending_checkpoint.pop("future", None)
+    pending_checkpoint.pop("version", None)
     checklist_rows.clear()
     checkpoint_dialog.close()
     fut.set_result(value)
@@ -214,37 +227,57 @@ def decide(value: str) -> None:
 
 
 def send_feedback() -> None:
-    """Compose un feedback structure : points OK/KO detailles + feedback global."""
-    lines = []
-    ko_count = 0
+    """Compose un feedback structure qualifie : A CORRIGER / SANS OBJET /
+    DEJA TRAITE, avec version de la production et commentaire global.
+
+    - au moins un 'A corriger'  -> re-generation (feedback prioritaire)
+    - uniquement Sans objet/Deja traite -> 'SANS CORRECTION' : etape validee
+      et decisions tracees dans le livrable, sans re-generation
+    """
+    version = pending_checkpoint.get("version", 1)
+    qualified = []
+    corriger_count = 0
     for row in checklist_rows:
         choice = row["toggle"].value
-        if choice not in ("OK", "KO"):
+        if choice not in ("corriger", "sans_objet", "deja_traite"):
             continue
         detail = (row["detail"].value or "").strip()
-        line = f"- [{choice}] {row['text']}"
+        label = {"corriger": "A CORRIGER", "sans_objet": "SANS OBJET",
+                 "deja_traite": "DEJA TRAITE"}[choice]
+        line = f"- [{label}] {row['text']}"
         if detail:
             line += f" — {detail}"
-        lines.append(line)
-        if choice == "KO":
-            ko_count += 1
+        qualified.append(line)
+        if choice == "corriger":
+            corriger_count += 1
     global_fb = (dlg_feedback.value or "").strip()
+
+    if not qualified and not global_fb:
+        _safe_notify(
+            "Qualifiez au moins un point, saisissez un feedback global, ou "
+            "utilisez CONTINUER / QUITTER.", type_="warning",
+        )
+        return
+
+    if corriger_count == 0 and qualified:
+        # Rien a corriger : decisions tracees, etape validee sans re-generation
+        text = (
+            f"SANS CORRECTION (version V{version}) — points de la relecture "
+            f"qualifies par l'humain :\n" + "\n".join(qualified)
+        )
+        if global_fb:
+            text += f"\nCommentaire global : {global_fb}"
+        dlg_feedback.set_value("")
+        decide(text)
+        return
+
+    lines = []
+    if qualified:
+        lines.extend(qualified)
     if global_fb:
         lines.append(f"Commentaire global : {global_fb}")
-    if not lines:
-        _safe_notify(
-            "Cochez au moins un point (OK/KO avec detail), saisissez un feedback "
-            "global, ou utilisez CONTINUER / QUITTER.", type_="warning",
-        )
-        return
-    if ko_count == 0 and not global_fb:
-        _safe_notify(
-            "Aucun KO et aucun commentaire : cliquez CONTINUER pour valider — "
-            "un feedback declencherait une re-generation inutile.", type_="info",
-        )
-        return
     dlg_feedback.set_value("")
-    decide("POINTS DE CONTROLE HUMAIN :\n" + "\n".join(lines))
+    decide(f"POINTS DE CONTROLE HUMAIN (version V{version}) :\n" + "\n".join(lines))
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +291,7 @@ async def on_progress(event: dict) -> None:
     if etype == "step_start" and card:
         card["badge"].set_text("En cours…")
         card["badge"].props("color=amber")
+        card["iteration"] = 0
         log.push(f"=== {event['name']} ===")
     elif etype == "production" and card:
         card["prod_md"].set_content(event["text"])
@@ -270,6 +304,7 @@ async def on_progress(event: dict) -> None:
         log.push(f"[{event.get('reviewer')}] relecture : {len(event.get('text', ''))} caracteres")
     elif etype == "step_retry" and card:
         n = event.get("iteration", 1)
+        card["iteration"] = n
         card["badge"].set_text(f"Re-generation #{n}…")
         card["badge"].props("color=orange")
         log.push(f">> Feedback integre : re-generation #{n} de {event['step_id']}")
