@@ -10,6 +10,15 @@ class RAGConfig:
     persist_directory: str = os.getenv("CHROMA_PERSIST_DIR", str(PROJECT_ROOT / "chroma_db"))
     collection_name: str = os.getenv("CHROMA_COLLECTION", "sdf_documents")
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "intfloat/multilingual-e5-large")
+    embedding_local_dir: str = os.getenv(
+        "EMBEDDING_LOCAL_DIR", str(PROJECT_ROOT / "models" / "embedding")
+    )
+    embedding_check_updates: bool = os.getenv(
+        "EMBEDDING_CHECK_UPDATES", "true"
+    ).lower() in ("1", "true", "yes")
+    embedding_offline: bool = os.getenv("EMBEDDING_OFFLINE", "false").lower() in (
+        "1", "true", "yes",
+    )
     chunk_size: int = int(os.getenv("CHUNK_SIZE", "1000"))
     chunk_overlap: int = int(os.getenv("CHUNK_OVERLAP", "200"))
     top_k: int = int(os.getenv("RAG_TOP_K", "8"))
@@ -39,7 +48,7 @@ class ModelProfiles:
         base_url=os.getenv("LOCAL_BASE_URL", "http://localhost:1234/v1"),
         api_key=os.getenv("LOCAL_API_KEY", "not-needed"),
         temperature=float(os.getenv("LOCAL_TEMPERATURE", "0.3")),
-        max_tokens=int(os.getenv("LOCAL_MAX_TOKENS", "16384")),
+        max_tokens=int(os.getenv("LOCAL_MAX_TOKENS", "24576")),
     ))
     default: str = os.getenv("DEFAULT_PROFILE", "cloud")
 

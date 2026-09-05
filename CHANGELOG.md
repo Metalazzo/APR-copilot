@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.3.13] - 2026-09-05
+
+### Ajout — embeddings locaux (zero reseau au demarrage)
+- Le modele d'embeddings est **copie localement** dans
+  `<projet>/models/embedding/` au premier lancement (sha de la version
+  enregistre dans `_meta.json`).
+- Lancements suivants : chargement **sans aucun appel au Hub** + verification
+  legere du sha distant (API publique, quelques Ko via urllib — plus de
+  warning « unauthenticated requests »). Si le depot a change : mise a jour
+  automatique de la copie locale.
+- `EMBEDDING_OFFLINE=true` coupe tout contact (copie locale requise) ;
+  `EMBEDDING_CHECK_UPDATES=false` desactive la verification.
+- `models/` ajoute au .gitignore.
+
+### Modifie
+- `LOCAL_MAX_TOKENS` 16384 -> **24576** : une production d'Ingenieur de
+  51033 caracteres correspondait exactement a l'ancien plafond de 16384
+  tokens (~52k caracteres) — generation probablement coupee avant sa fin.
+  Verifie : 4 x 60000 car. d'injection + 24576 tokens de sortie restent
+  sous les 102912 tokens de contexte charges.
+
+### Rollback
+- Etat pre-modification : commit `81d1d3e`
+
 ## [1.3.12] - 2026-09-05
 
 ### Ameliore — semantique explicite de la check-list de checkpoint

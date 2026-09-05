@@ -3,6 +3,7 @@ __pycache__/
 *.pyo
 chroma_db/
 output/
+models/
 .env
 *.egg-info/
 .venv/

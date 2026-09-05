@@ -1,4 +1,5 @@
 import hashlib
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,10 +38,94 @@ class IngestReport:
         return "\n".join(lines)
 
 
+def _hub_sha(repo_id: str) -> str:
+    """Sha (revision) du depot HuggingFace via l'API publique : quelques Ko,
+    sans la lib huggingface_hub (donc sans le warning 'unauthenticated')."""
+    import urllib.request
+    url = f"https://huggingface.co/api/models/{repo_id}"
+    req = urllib.request.Request(url, headers={"User-Agent": "APR-Copilot/1.0"})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return (json.loads(resp.read().decode("utf-8")) or {}).get("sha", "")
+
+
+def _read_local_sha(meta_path: Path) -> str:
+    try:
+        return (json.loads(meta_path.read_text(encoding="utf-8")) or {}).get("sha", "")
+    except Exception:
+        return ""
+
+
+def _write_local_sha(meta_path: Path, repo_id: str, sha: str) -> None:
+    meta_path.write_text(
+        json.dumps({"repo": repo_id, "sha": sha}, indent=2), encoding="utf-8"
+    )
+
+
 def get_embedding_model() -> SentenceTransformer:
+    """Charge le modele d'embeddings en privilegiant la copie locale.
+
+    Cycle voulu :
+    - premier lancement : telechargement depuis le Hub, copie complete dans
+      EMBEDDING_LOCAL_DIR, sha de la version enregistre dans _meta.json
+    - lancements suivants : chargement local SANS reseau, puis verification
+      legere du sha distant (quelques Ko) ; si le depot a change, mise a jour
+      automatique de la copie locale
+    - EMBEDDING_OFFLINE=true ou erreur reseau : verification ignoree, jamais
+      bloquant (si la copie locale est absente en mode offline, erreur claire).
+    """
     global _embedding_model
-    if _embedding_model is None:
-        _embedding_model = SentenceTransformer(app_config.rag.embedding_model)
+    if _embedding_model is not None:
+        return _embedding_model
+
+    local_dir = Path(app_config.rag.embedding_local_dir)
+    repo = app_config.rag.embedding_model
+    meta_path = local_dir / "_meta.json"
+    offline = app_config.rag.embedding_offline
+
+    if local_dir.exists():
+        model = SentenceTransformer(str(local_dir))
+        _embedding_model = model
+        if offline:
+            print("[embeddings] mode hors ligne : verification de mise a jour ignoree")
+            return _embedding_model
+        if app_config.rag.embedding_check_updates:
+            try:
+                remote_sha = _hub_sha(repo)
+                local_sha = _read_local_sha(meta_path)
+                if remote_sha and local_sha and remote_sha != local_sha:
+                    print(f"[embeddings] mise a jour disponible ({repo}) -> telechargement...")
+                    fresh = SentenceTransformer(repo)
+                    fresh.save(str(local_dir))
+                    _write_local_sha(meta_path, repo, remote_sha)
+                    _embedding_model = fresh
+                    print("[embeddings] copie locale mise a jour")
+                else:
+                    print("[embeddings] copie locale a jour")
+            except Exception as exc:
+                print(f"[embeddings] verification de mise a jour impossible (hors ligne ?) : {exc}")
+        return _embedding_model
+
+    if offline:
+        raise RuntimeError(
+            f"EMBEDDING_OFFLINE actif mais aucune copie locale du modele ({local_dir}). "
+            "Relancez une fois en ligne pour la creer."
+        )
+
+    print(f"[embeddings] premiere installation : telechargement de {repo}...")
+    model = SentenceTransformer(repo)
+    local_dir.mkdir(parents=True, exist_ok=True)
+    model.save(str(local_dir))
+    try:
+        sha = _hub_sha(repo)
+        if sha:
+            _write_local_sha(meta_path, repo, sha)
+    except Exception:
+        pass
+    _embedding_model = model
+    print(
+        f"[embeddings] modele copie localement dans {local_dir} — les prochains "
+        "lancements n'interrogeront plus le Hub (verification legere uniquement)."
+    )
     return _embedding_model
 
 

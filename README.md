@@ -45,6 +45,7 @@ Variables d'environnement (ou modifier `config.py`) :
 | Variable | Defaut | Description |
 |----------|--------|-------------|
 | `LOCAL_MODEL` | `gemma-4-12b-qat` | Modele local pour le Secretaire |
+| `LOCAL_MAX_TOKENS` | `24576` | Plafond de generation par appel (≈ 78k caracteres de sortie) |
 | `LOCAL_BASE_URL` | `http://localhost:1234/v1` | URL LM Studio |
 | `LOCAL_API_KEY` | `not-needed` | Cle API |
 
@@ -71,7 +72,10 @@ Variables d'environnement (ou modifier `config.py`) :
 | Variable | Defaut | Description |
 |----------|--------|-------------|
 | `CHROMA_PERSIST_DIR` | `./chroma_db` | Repertoire du vector store |
-| `EMBEDDING_MODEL` | `intfloat/multilingual-e5-large` | Modele d'embeddings |
+| `EMBEDDING_MODEL` | `intfloat/multilingual-e5-large` | Depot HuggingFace du modele d'embeddings |
+| `EMBEDDING_LOCAL_DIR` | `<projet>/models/embedding` | Copie locale du modele : apres le premier lancement, plus aucun appel au Hub |
+| `EMBEDDING_CHECK_UPDATES` | `true` | Verification legere du sha du depot au demarrage (quelques Ko) ; mise a jour automatique de la copie locale si le depot a change |
+| `EMBEDDING_OFFLINE` | `false` | Coupe tout contact avec le Hub (copie locale requise) |
 
 ### Exemple : 100% local avec LM Studio
 
