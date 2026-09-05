@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.3.14] - 2026-09-05
+
+### Ajout — gestion automatique du contexte (modele local)
+- Detection du contexte **reellement charge** du modele local au demarrage de
+  chaque analyse (API LM Studio `/api/v0/models`, une requete de quelques Ko,
+  mise en cache par analyse).
+- **Calcul automatique de la limite d'injection par etape** :
+  `(ctx - LOCAL_MAX_TOKENS - overhead 15k) x securite 0,9` tokens, convertis en
+  caracteres (~3,5 car./token) et divises par le nombre d'etapes precedentes.
+  Ex. avec 153 856 tokens charges : ~90 000 caracteres par etape.
+- Repli automatique sur `STEP_CONTEXT_LIMIT` (40 000) si la detection echoue
+  (serveur non-LM Studio, hors ligne, cloud pur) ; switch GUI « Contexte
+  automatique » (defaut ON) et `CONTEXT_AUTO` pour forcer le manuel.
+- Log/GUI : « [contexte] auto : 153856 tokens charges -> limite 90000
+  caracteres par etape precedente ».
+
 ## [1.3.13] - 2026-09-05
 
 ### Ajout — embeddings locaux (zero reseau au demarrage)

@@ -316,6 +316,11 @@ async def on_progress(event: dict) -> None:
             f"[contexte] Des points risquent de sauter — augmentez la limite "
             f"(actuellement {event.get('limit', '?')} caracteres)."
         )
+    elif etype == "context_auto":
+        log.push(
+            f"[contexte] auto : {event.get('ctx', '?')} tokens charges -> "
+            f"{event.get('limit', '?')} caracteres par etape precedente"
+        )
     elif etype == "web_search":
         if event.get("error"):
             log.push(f"[web] recherche indisponible : {event['error'][:80]}")
@@ -417,6 +422,7 @@ async def start_analysis():
     os.environ["SEARXNG_URL"] = str(searxng_url_input.value or "")
     os.environ["TAVILY_API_KEY"] = str(tavily_key_input.value or "")
     os.environ["STEP_CONTEXT_LIMIT"] = str(int(step_context_limit_input.value or 40000))
+    os.environ["CONTEXT_AUTO"] = "true" if context_auto_switch.value else "false"
 
     def _local_profile() -> ModelProfile:
         return ModelProfile(
@@ -524,7 +530,7 @@ def build_page() -> None:
     global cloud_model, cloud_base_url, cloud_api_key, cloud_temp, cloud_max_tokens
     global function_calling_switch, timeout_input, retries_input, reasoning_select
     global web_search_switch, web_backend, searxng_url_input, tavily_key_input
-    global step_context_limit_input
+    global step_context_limit_input, context_auto_switch
     global checkpoint_dialog, dlg_title, dlg_prod_md, dlg_review_md, dlg_status
     global dlg_feedback, btn_continue, btn_quit, btn_feedback
     global dlg_card, dlg_prod_scroll, dlg_review_scroll, btn_maximize, dlg_points_container
@@ -645,6 +651,9 @@ def build_page() -> None:
                     value=float(os.getenv("STEP_CONTEXT_LIMIT", "40000")),
                     format="%.0f", min=1000,
                 ).props("label-always").classes("w-full")
+                context_auto_switch = ui.switch(
+                    "Contexte automatique (detecte via LM Studio)", value=True
+                )
 
             with ui.card().classes("w-full"):
                 ui.label("Base documentaire (RAG)").classes("text-subtitle1")
