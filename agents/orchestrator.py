@@ -222,10 +222,14 @@ l'option de traitement (REDUCTION / MAINTIEN / REFUS / PARTAGE) et le risque res
 - Mesures et conditions d'execution
 - Decision requise : QUI doit accepter (proprietaire des risques), a quel niveau
 - Conditions d'acceptation eventuelles (duree, en attendant une action...)
-- Suivi prevu (revue periodique)]
+- Suivi prevu (revue periodique)
+- Colonne 'Decision humaine' (OK/KO + detail) d'apres la section Decisions
+  humaines enregistrees, si fournie]
 
 ## Bloc 5 - Points ouverts pour validation humaine
-[Liste priorisee : ambiguites, hypotheses critiques, elements manquants, decisions attendues]
+[Liste priorisee : ambiguites, hypotheses critiques, elements manquants, decisions
+attendues. Pour chaque point, ajouter la 'Decision humaine' (OK/KO + detail)
+d'apres la section Decisions humaines enregistrees, si fournie]
 ---
 
 Format : Markdown, pret a etre converti en document Word ou Excel.
@@ -516,6 +520,20 @@ class RiskAnalysisOrchestrator:
                 f"\n\n## FEEDBACK HUMAIN A INTEGRER (prioritaire, a suivre a la lettre)\n"
                 f"{human_feedback}"
             )
+        # Decisions/feedbacks humains traces aux checkpoints : a refléter dans
+        # Bloc 4/Bloc 5 du livrable (colonne 'Decision humaine' par point).
+        decisions = [
+            f"### Etape '{sid}'\n{txt}"
+            for sid, txt in self.state.human_validations.items()
+            if txt and txt not in ("validated", "quit")
+        ]
+        if decisions:
+            task += (
+                "\n\n## Decisions et feedbacks humains enregistres aux points de controle\n"
+                "(A refléter dans Bloc 4 et Bloc 5 : pour chaque point a valider, ajouter "
+                "une colonne/mention 'Decision humaine' : OK/KO + detail)\n"
+                + "\n\n".join(decisions)
+            )
         previous = await self._previous_outputs_section(exclude_step_id=step["id"])
 
         if previous:
@@ -668,7 +686,9 @@ class RiskAnalysisOrchestrator:
 
                 answer = feedback.upper().strip()
                 if answer == "CONTINUER":
-                    self.state.human_validations[step["id"]] = "validated"
+                    self.state.human_validations[step["id"]] = (
+                        self._feedback_section(feedbacks) if feedbacks else "validated"
+                    )
                     print(">> Etape validee.")
                     break
                 if answer == "QUITTER":

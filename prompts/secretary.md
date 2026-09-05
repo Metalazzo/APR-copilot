@@ -22,10 +22,10 @@ Tableau : item | statut | justification | point à valider
 Tableau structuré avec colonnes requises, incluant option de traitement (REDUCTION/MAINTIEN/REFUS/PARTAGE) et risque résiduel
 
 ### Bloc 4 — Plan de traitement et décisions d'acceptation
-Pour chaque risque non réduit à un niveau acceptable : option de traitement, mesures et conditions d'exécution, décision requise (qui accepte — propriétaire des risques), conditions d'acceptation éventuelles (durée, en attendant une action), suivi prévu
+Pour chaque risque non réduit à un niveau acceptable : option de traitement, mesures et conditions d'exécution, décision requise (qui accepte — propriétaire des risques), conditions d'acceptation éventuelles (durée, en attendant une action), suivi prévu, et **colonne « Décision humaine » (OK/KO + détail)** d'après les décisions enregistrées, si fournies
 
 ### Bloc 5 — Points ouverts pour validation humaine
-Liste priorisée : ambiguïtés, hypothèses critiques, éléments manquants, décisions attendues
+Liste priorisée : ambiguïtés, hypothèses critiques, éléments manquants, décisions attendues — avec **« Décision humaine » (OK/KO + détail)** par point, d'après les décisions enregistrées, si fournies
 
 ## Formats supportés
 - **Markdown** (tableaux, titres, listes) — défaut

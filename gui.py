@@ -81,6 +81,47 @@ def _safe_notify(message: str, type_: str = "info") -> None:
         log.push(f"[notif] {message}")
 
 
+def _parse_review_points(review_text: str, max_items: int = 12) -> list[str]:
+    """Extrait les points a valider (lignes a puces / numerotees) de la relecture."""
+    import re
+    items = []
+    for ln in (review_text or "").splitlines():
+        s = ln.strip()
+        m = re.match(r"^(?:[-*•]|\d+[.\)])\s+(.*)$", s)
+        if m:
+            item = re.sub(r"\*+", "", m.group(1)).strip()
+            if len(item) > 3 and not item.lower().startswith(("http", "source ")):
+                items.append(item[:200])
+        if len(items) >= max_items:
+            break
+    return items
+
+
+checklist_rows: list = []              # lignes OK/KO detail de la popup en cours
+dialog_state: dict = {"maximized": False}
+
+
+def _apply_dialog_size() -> None:
+    border_p = "border-left: 3px solid #1976d2; padding-left: 8px; "
+    border_r = "border-left: 3px solid #f9a825; padding-left: 8px; "
+    if dialog_state["maximized"]:
+        dlg_card.style("width: 97vw; height: 94vh; overflow: auto")
+        dlg_prod_scroll.style(border_p + "height: 62vh")
+        dlg_review_scroll.style(border_r + "height: 62vh")
+    else:
+        dlg_card.style(
+            "width: 1650px; max-width: 96vw; height: 90vh; resize: both; overflow: auto"
+        )
+        dlg_prod_scroll.style(border_p + "height: 40vh")
+        dlg_review_scroll.style(border_r + "height: 40vh")
+    btn_maximize.props("icon=fullscreen_exit" if dialog_state["maximized"] else "icon=fullscreen")
+
+
+def toggle_maximize() -> None:
+    dialog_state["maximized"] = not dialog_state["maximized"]
+    _apply_dialog_size()
+
+
 async def gui_checkpoint(step_id: str, production: str, review: str, all_outputs: dict) -> str:
     """human_callback : ouvre la popup de relecture/decision et attend la decision."""
     loop = asyncio.get_running_loop()
@@ -109,12 +150,50 @@ def _open_checkpoint_dialog(step_id: str) -> None:
     dlg_title.set_text(f"Point de controle — {card['name']}")
     dlg_prod_md.set_content(card.get("production_text") or "*Production non generee*")
     dlg_review_md.set_content(card.get("review_text") or "*Aucune relecture*")
+
+    # Check-list OK/KO detail, construite depuis les points de la relecture
+    dlg_points_container.clear()
+    checklist_rows.clear()
+    if pending_here:
+        points = _parse_review_points(card.get("review_text") or "")
+        with dlg_points_container:
+            if points:
+                ui.label("Points a valider (extraits de la relecture) :").classes(
+                    "text-subtitle2"
+                )
+                with ui.scroll_area().style(
+                    "height: 16vh; border-left: 3px solid #ddd; padding-left: 8px"
+                ):
+                    for pt in points:
+                        with ui.row().classes("w-full items-center no-wrap"):
+                            tog = ui.toggle(["OK", "KO"], clearable=True).props(
+                                "dense size=sm"
+                            )
+                            ui.label(pt).classes(
+                                "grow text-caption"
+                            ).style(
+                                "overflow: hidden; text-overflow: ellipsis; white-space: nowrap"
+                            )
+                            det = ui.input(placeholder="detail (si KO)").props(
+                                "dense outlined"
+                            ).style("width: 300px")
+                        checklist_rows.append(
+                            {"text": pt, "toggle": tog, "detail": det}
+                        )
+            else:
+                ui.label(
+                    "Aucun point liste detecte dans la relecture — utilisez le "
+                    "feedback global ci-dessous."
+                ).classes("text-caption text-grey")
+
     for btn in (btn_continue, btn_quit, btn_feedback):
         btn.set_visibility(pending_here)
     dlg_feedback.set_visibility(pending_here)
+    dlg_points_container.set_visibility(pending_here)
     dlg_status.set_text(
-        "Decision attendue : CONTINUER, QUITTER, ou feedback — la popup se fermera "
-        "automatiquement une fois le choix envoye."
+        "Decision attendue : marquez les points OK/KO avec un detail, ajoutez un "
+        "feedback global si besoin — la popup se fermera automatiquement une fois "
+        "le choix envoye."
         if pending_here
         else "Consultation. Aucune decision en attente sur cette etape."
     )
@@ -128,18 +207,44 @@ def decide(value: str) -> None:
         return
     step_id = pending_checkpoint.pop("step_id", None)
     pending_checkpoint.pop("future", None)
+    checklist_rows.clear()
     checkpoint_dialog.close()
     fut.set_result(value)
     log.push(f">> Checkpoint {step_id} : {value[:80]}")
 
 
 def send_feedback() -> None:
-    text = (dlg_feedback.value or "").strip()
-    if not text:
-        ui.notify("Saisissez un feedback (ou utilisez CONTINUER / QUITTER).", type="warning")
+    """Compose un feedback structure : points OK/KO detailles + feedback global."""
+    lines = []
+    ko_count = 0
+    for row in checklist_rows:
+        choice = row["toggle"].value
+        if choice not in ("OK", "KO"):
+            continue
+        detail = (row["detail"].value or "").strip()
+        line = f"- [{choice}] {row['text']}"
+        if detail:
+            line += f" — {detail}"
+        lines.append(line)
+        if choice == "KO":
+            ko_count += 1
+    global_fb = (dlg_feedback.value or "").strip()
+    if global_fb:
+        lines.append(f"Commentaire global : {global_fb}")
+    if not lines:
+        _safe_notify(
+            "Cochez au moins un point (OK/KO avec detail), saisissez un feedback "
+            "global, ou utilisez CONTINUER / QUITTER.", type_="warning",
+        )
+        return
+    if ko_count == 0 and not global_fb:
+        _safe_notify(
+            "Aucun KO et aucun commentaire : cliquez CONTINUER pour valider — "
+            "un feedback declencherait une re-generation inutile.", type_="info",
+        )
         return
     dlg_feedback.set_value("")
-    decide(text)
+    decide("POINTS DE CONTROLE HUMAIN :\n" + "\n".join(lines))
 
 
 # ---------------------------------------------------------------------------
@@ -387,6 +492,7 @@ def build_page() -> None:
     global step_context_limit_input
     global checkpoint_dialog, dlg_title, dlg_prod_md, dlg_review_md, dlg_status
     global dlg_feedback, btn_continue, btn_quit, btn_feedback
+    global dlg_card, dlg_prod_scroll, dlg_review_scroll, btn_maximize, dlg_points_container
     global ingest_dir, ingest_reset, ingest_btn, ingest_progress
     global project_input, context_input, run_btn, run_progress
 
@@ -573,23 +679,26 @@ def build_page() -> None:
 
     # Popup de relecture / decision des checkpoints
     with ui.dialog() as checkpoint_dialog:
-        with ui.card().style("width: 1100px; max-width: 96vw"):
-            dlg_title = ui.label("Point de controle").classes("text-h6")
+        with ui.card() as dlg_card:
+            with ui.row().classes("w-full items-center justify-between"):
+                dlg_title = ui.label("Point de controle").classes("text-h6")
+                btn_maximize = ui.button(
+                    icon="fullscreen", on_click=toggle_maximize
+                ).props("flat dense")
             with ui.row().classes("w-full items-stretch"):
                 with ui.column().classes("col grow"):
                     ui.label("Production").classes("text-subtitle2 text-grey")
-                    with ui.scroll_area().style(
-                        "height: 45vh; border-left: 3px solid #1976d2; padding-left: 8px"
-                    ):
+                    with ui.scroll_area() as dlg_prod_scroll:
                         dlg_prod_md = ui.markdown("")
                 with ui.column().classes("col grow"):
                     ui.label("Relecture").classes("text-subtitle2 text-grey")
-                    with ui.scroll_area().style(
-                        "height: 45vh; border-left: 3px solid #f9a825; padding-left: 8px"
-                    ):
+                    with ui.scroll_area() as dlg_review_scroll:
                         dlg_review_md = ui.markdown("")
+            dlg_points_container = ui.column().classes("w-full")
             dlg_status = ui.label("").classes("text-caption text-grey")
-            dlg_feedback = ui.input("Feedback a integrer (optionnel)").classes("w-full")
+            dlg_feedback = ui.textarea(
+                "Feedback global (libre, optionnel — structuré si besoin)"
+            ).classes("w-full")
             with ui.row():
                 btn_continue = ui.button(
                     "CONTINUER", on_click=lambda: decide("CONTINUER")
@@ -600,6 +709,7 @@ def build_page() -> None:
                 btn_feedback = ui.button(
                     "Envoyer le feedback", on_click=send_feedback
                 ).props("color=warning")
+    _apply_dialog_size()
 
     ui.label(
         "Outil local mono-utilisateur. Les livrables sont ecrits dans "

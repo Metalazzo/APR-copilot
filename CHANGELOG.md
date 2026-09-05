@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.3.11] - 2026-09-05
+
+### Ameliore — GUI : popup de checkpoint plus pratique
+- **Popup grande et redimensionnable** : 1650x90vh par defaut avec poignee de
+  redimensionnement (CSS resize), bouton **plein ecran/restaurer**, zones
+  production/relecture elargies.
+- **Check-list OK/KO par point** : les points listes dans la relecture (lignes a
+  puces/numerotees) deviennent des lignes cochables avec champ detail. L'envoi
+  compose un feedback structure « POINTS DE CONTROLE HUMAIN : - [KO] point —
+  detail / - [OK] point / Commentaire global » injecte comme prioritaire a la
+  re-generation. Sans KO ni commentaire -> conseil d'utiliser CONTINUER (evite
+  une re-generation inutile).
+- **Feedback global en zone multiligne** (textarea) au lieu d'une ligne.
+- **Decisions tracees dans le livrable** (aligne Clusif §4.6) : les feedbacks
+  cumules de chaque etape sont enregistres et transmis au Secretaire avec
+  consigne d'ajouter dans Bloc 4/Bloc 5 une colonne « Decision humaine »
+  (OK/KO + detail) par point a valider.
+
+## [1.3.10] - 2026-09-02
+
+### Ajout — alignement referentiel Clusif / ISO 27005
+- Etape barrieres : les 4 options de traitement ISO 27005 (REDUCTION /
+  MAINTIEN / REFUS / PARTAGE) + risque RESIDUEL estime apres barrieres.
+- Livraison : 5 sections — Bloc 1 avec tableau RACI de la demarche (A =
+  proprietaire des risques/validateur humain, R = Ingenieur, C = Qualite +
+  Client, I = Secretaire) ; nouveau Bloc 4 « Plan de traitement et decisions
+  d'acceptation » ; Bloc 5 = points ouverts.
+- secretary.md / agents.py : 5 sections standard ; engineer.md : Etape 6 =
+  barrieres + traitement + risque residuel ; quality.md : check-list
+  conformite Clusif/ISO 27005.
+- RAG : guide Clusif « Analyse de risques en pratique » indexe
+  (test/references/, 310 chunks).
+
 ## [1.3.9] - 2026-09-03
 
 ### Ameliore — marges de contexte et visibilite des troncatures
