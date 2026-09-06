@@ -47,7 +47,7 @@ def _auto_context_limit() -> Optional[int]:
                 ctx = int(m.get("loaded_context_length") or 0)
                 break
         if ctx > 0:
-            out_tokens = int(os.getenv("LOCAL_MAX_TOKENS", "24576"))
+            out_tokens = int(os.getenv("LOCAL_MAX_TOKENS", "32768"))
             overhead = int(os.getenv("CONTEXT_OVERHEAD_TOKENS", "15000"))
             safety = float(os.getenv("CONTEXT_SAFETY", "0.9"))
             chars_per_token = float(os.getenv("CONTEXT_CHARS_PER_TOKEN", "3.5"))
@@ -115,7 +115,7 @@ Categories d'agressions a evaluer :
 - Agressions CEM (perturbations conduites, rayonnees, foudre)
 - Agressions humaines/organisationnelles (erreur de manipulation, maintenance inadequate, malveillance)
 
-Menaces generiques a evaluer :
+Menaces generiques a evaluer (mecanismes de defaillance) :
 - Defaillance / perte de fonction
 - Fonction intempestive
 - Erreur humaine
@@ -123,6 +123,15 @@ Menaces generiques a evaluer :
 - Defaut d'interface
 - Degradation progressive
 - Action externe hostile (si pertinent)
+
+Menaces EMISES par le systeme vers son environnement (le systeme source de danger) :
+- Degazage / emanations chaudes ou toxiques (ex. batterie : degazement tres chaud -> menace haute temperature vers l'environnement)
+- Echauffement emis / flamme / projection incandescente
+- Fuite de fluide, explosion, ejection de pieces
+- Danger electrique par contact, CEM emis, incendie propage, bruit emis, rayonnement
+- Pour chaque fonction/composant, identifier ce que le systeme peut EMETTRE ou PROVOQUER, et les cibles : environnement proche, autres equipements, personnel
+
+L'analyse est BIDIRECTIONNELLE : ce que le systeme SUBIT (agressions recues) ET ce qu'il FAIT SUBIR a son environnement (menaces emises). Ne pas se limiter au volet dysfonctionnel.
 
 Pour chaque item :
 - Statut : applicable / non applicable / a confirmer
@@ -285,6 +294,60 @@ d'apres la section Decisions humaines enregistrees, si fournie]
 Format : Markdown, pret a etre converti en document Word ou Excel.
 Sois sobre, professionnel, structure. Pas de fioritures.""",
         "reviewer_task": None,
+    },
+]
+
+
+LIVRAISON_BLOCS = [
+    {
+        "id": "bloc1",
+        "titre": "Bloc 1 — Résumé exécutif et gouvernance",
+        "sources": ["cadrage"],
+        "consigne": """Produis UNIQUEMENT le Bloc 1 du livrable : resume executif et gouvernance.
+- Objet, perimetre, principales hypotheses, niveau de confiance global (reprends ceux du cadrage, ne les reinvente pas, n'en perds aucun)
+- Tableau RACI de la demarche :
+  A (Approuve, proprietaire des risques) : decision finale d'acceptation - humain validateur
+  R (Realise) : Ingenieur Technique SDF
+  C (Consulte) : Animateur Qualite, Representant Client
+  I (Informe) : Secretaire / livrable""",
+    },
+    {
+        "id": "bloc2",
+        "titre": "Bloc 2 — Filtrage des agressions et menaces",
+        "sources": ["filtrage"],
+        "consigne": """Produis UNIQUEMENT le Bloc 2 du livrable : le tableau de filtrage des agressions et menaces.
+Reprends TOUTES les lignes du filtrage fourni (agressions recues ET menaces emises) — AUCUNE ligne ne doit disparaitre, ne resume pas.
+Colonnes : item | statut | justification | point a valider""",
+    },
+    {
+        "id": "bloc3",
+        "titre": "Bloc 3 — Analyse préliminaire de risque",
+        "sources": ["scenarios", "barrieres"],
+        "consigne": """Produis UNIQUEMENT le Bloc 3 du livrable : les tableaux d'analyse preliminaire de risque.
+Source principale : les scenarios de risque ; complete la colonne barrieres/traitement avec les barrieres.
+Colonnes requises : ID | Fonction | Phase de vie | Agression/Menace | Situation dangereuse | Evenement redoute | Causes | Consequences | Barrieres existantes | Barrieres recommandees | Gravite | Vraisemblance | Niveau de risque | Option de traitement | Risque residuel | Justification | Confiance | Points a valider
+Reprends TOUS les scenarios fournis — AUCUN ne doit disparaitre. Ne resume pas, ne fusionne pas arbitrariairement.""",
+    },
+    {
+        "id": "bloc4",
+        "titre": "Bloc 4 — Plan de traitement et décisions d'acceptation",
+        "sources": ["barrieres"],
+        "consigne": """Produis UNIQUEMENT le Bloc 4 du livrable : plan de traitement et decisions d'acceptation.
+Pour chaque risque non reduit a un niveau acceptable :
+- Option de traitement (REDUCTION / MAINTIEN / REFUS / PARTAGE)
+- Mesures et conditions d'execution
+- Decision requise : QUI doit accepter (proprietaire des risques), a quel niveau
+- Conditions d'acceptation eventuelles (duree, en attendant une action...)
+- Suivi prevu (revue periodique)
+- Colonne 'Decision humaine' (OK/KO + detail) d'apres la section Decisions humaines, si fournie""",
+    },
+    {
+        "id": "bloc5",
+        "titre": "Bloc 5 — Points ouverts pour validation humaine",
+        "sources": ["cadrage", "filtrage", "scenarios", "barrieres"],
+        "consigne": """Produis UNIQUEMENT le Bloc 5 du livrable : points ouverts pour validation humaine.
+Liste priorisee : ambiguites, hypotheses critiques, elements manquants, decisions attendues — avec la 'Decision humaine' (OK/KO + detail) par point d'apres la section Decisions humaines, si fournie.
+Reprends tous les points a valider mentionnes dans les sections fournies.""",
     },
 ]
 
@@ -549,54 +612,87 @@ class RiskAnalysisOrchestrator:
         enriched_task += f"## Tache\n{step['task']}"
         return await self._ask_agent(self.engineer, enriched_task)
 
-    async def _secretary_task(
+    def _step_name(self, sid: str) -> str:
+        for s in WORKFLOW_STEPS:
+            if s["id"] == sid:
+                return s["name"]
+        return sid
+
+    def _livraison_bloc_task(
         self,
-        step: dict,
-        human_feedback: str = "",
+        bloc: dict,
         previous_production: str = "",
+        human_feedback: str = "",
     ) -> str:
-        """Constitue la tache du Secretaire : template + travaux precedents a assembler."""
-        task = (
-            f"{step['task']}\n\n"
-            f"## Consignes de restitution\n"
-            f"- Reponds UNIQUEMENT avec le document final, sans preambule, sans "
-            f"commentaire meta, sans mention du processus ou du format genere.\n"
-            f"- Reprends fidelement les travaux precedents fournis ci-dessous : "
-            f"n'invente aucun risque, aucune barriere ni aucune donnee qui n'y "
-            f"figure pas."
-        )
-        if previous_production:
-            task += (
-                f"\n\n## Version precedente du document (A CORRIGER selon le feedback)\n"
-                f"{previous_production[: self._step_context_limit()]}"
-            )
-        if human_feedback:
-            task += (
-                f"\n\n## FEEDBACK HUMAIN A INTEGRER (prioritaire, a suivre a la lettre)\n"
-                f"{human_feedback}"
-            )
-        # Decisions/feedbacks humains traces aux checkpoints : a refléter dans
-        # Bloc 4/Bloc 5 du livrable (colonne 'Decision humaine' par point).
+        """Tache focalisee pour UN bloc de la livraison : sources dediees + regles."""
+        limit = self._step_context_limit()
+        parts = [f"## Tache\n{bloc['consigne']}"]
+
+        for sid in bloc["sources"]:
+            out = self.state.outputs.get(sid)
+            if out:
+                parts.append(
+                    f"## Section source : {self._step_name(sid)}\n{out[:limit]}"
+                )
+
         decisions = [
             f"### Etape '{sid}'\n{txt}"
             for sid, txt in self.state.human_validations.items()
             if txt and txt not in ("validated", "quit")
         ]
         if decisions:
-            task += (
-                "\n\n## Decisions et feedbacks humains enregistres aux points de controle\n"
-                "(A refléter dans Bloc 4 et Bloc 5 : pour chaque point a valider, ajouter "
-                "une colonne/mention 'Decision humaine' : OK/KO + detail)\n"
+            parts.append(
+                "## Decisions et feedbacks humains enregistres aux points de controle\n"
                 + "\n\n".join(decisions)
             )
-        previous = await self._previous_outputs_section(exclude_step_id=step["id"])
 
-        if previous:
-            task += (
-                f"\n\n## Travaux precedents de l'analyse (source unique de verite)\n"
-                f"{previous}"
+        if previous_production and human_feedback:
+            parts.append(
+                f"## Livrable precedent (A CORRIGER selon le feedback humain)\n"
+                f"{previous_production[: self._step_context_limit()]}"
             )
-        return task
+            parts.append(
+                f"## FEEDBACK HUMAIN A INTEGRER (prioritaire, a suivre a la lettre)\n"
+                f"{human_feedback}"
+            )
+
+        parts.append(
+            "## Regles\n"
+            "- Reponds UNIQUEMENT avec le contenu du bloc demande, sans preambule, "
+            "sans commentaire meta, sans mention du processus ou du format genere.\n"
+            "- Reprends fidelement les sections fournies : ne resume pas, ne perds "
+            "aucune ligne ni aucun point, n'invente rien.\n"
+            "- Français, Markdown, tableaux complets."
+        )
+        return "\n\n".join(parts)
+
+    async def _run_secretary_step(
+        self,
+        step: dict,
+        previous_production: str = "",
+        human_feedback: str = "",
+    ) -> str:
+        """Etape livraison : assemblage PAR BLOCS en plusieurs appels focalises.
+
+        Un seul appel ne peut pas retranscrire fidelement ~200k caracteres de
+        productions (sortie plafonnee a max_tokens) : la generation s'arretait
+        en cours de route (livrable ampute du Bloc 4/5). Chaque bloc est
+        desormais produit par un appel dedie, puis les blocs sont concatenes.
+        """
+        outputs = []
+        total = len(LIVRAISON_BLOCS)
+        for i, bloc in enumerate(LIVRAISON_BLOCS, 1):
+            await self._emit({
+                "type": "delivery_bloc",
+                "step_id": step["id"],
+                "bloc": f"{i}/{total}",
+                "titre": bloc["titre"],
+            })
+            task = self._livraison_bloc_task(bloc, previous_production, human_feedback)
+            out = await self._ask_agent(self.secretary, task)
+            outputs.append(f"## {bloc['titre']}\n\n{out.strip()}")
+            print(f"[livraison] {bloc['titre']} : {len(out)} caracteres ({i}/{total})")
+        return "\n\n".join(outputs)
 
     async def _run_reviewer_step(
         self,
@@ -680,9 +776,7 @@ class RiskAnalysisOrchestrator:
                     if agent_name == "engineer":
                         production = await self._run_engineer_step(step)
                     else:
-                        production = await self._ask_agent(
-                            self.secretary, await self._secretary_task(step)
-                        )
+                        production = await self._run_secretary_step(step)
                 else:
                     await self._emit({
                         "type": "step_retry",
@@ -698,13 +792,10 @@ class RiskAnalysisOrchestrator:
                             human_feedback=self._feedback_section(feedbacks),
                         )
                     else:
-                        production = await self._ask_agent(
-                            self.secretary,
-                            await self._secretary_task(
-                                step,
-                                human_feedback=self._feedback_section(feedbacks),
-                                previous_production=production,
-                            ),
+                        production = await self._run_secretary_step(
+                            step,
+                            previous_production=production,
+                            human_feedback=self._feedback_section(feedbacks),
                         )
 
                 all_outputs[step["id"]] = production

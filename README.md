@@ -45,7 +45,7 @@ Variables d'environnement (ou modifier `config.py`) :
 | Variable | Defaut | Description |
 |----------|--------|-------------|
 | `LOCAL_MODEL` | `gemma-4-12b-qat` | Modele local pour le Secretaire |
-| `LOCAL_MAX_TOKENS` | `24576` | Plafond de generation par appel (≈ 78k caracteres de sortie) |
+| `LOCAL_MAX_TOKENS` | `32768` | Plafond de generation par appel (≈ 105k caracteres de sortie) |
 | `LOCAL_BASE_URL` | `http://localhost:1234/v1` | URL LM Studio |
 | `LOCAL_API_KEY` | `not-needed` | Cle API |
 

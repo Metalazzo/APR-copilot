@@ -335,7 +335,16 @@ async def on_progress(event: dict) -> None:
             elif answer == "QUITTER":
                 card["badge"].set_text("Interrompue")
                 card["badge"].props("color=red")
+            elif answer.startswith("SANS CORRECTION"):
+                card["badge"].set_text("Validee (decisions tracees)")
+                card["badge"].props("color=green")
         log.push(f">> {event['step_id']} : {event['answer'][:80]}")
+    elif etype == "delivery_bloc":
+        card = step_cards.get(event.get("step_id", ""))
+        if card:
+            card["badge"].set_text(f"Livraison bloc {event.get('bloc', '')}…")
+            card["badge"].props("color=teal")
+        log.push(f"[livraison] {event.get('titre', '')} ({event.get('bloc', '')})")
     elif etype == "done":
         log.push("=== Analyse terminee ===")
 

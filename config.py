@@ -48,7 +48,7 @@ class ModelProfiles:
         base_url=os.getenv("LOCAL_BASE_URL", "http://localhost:1234/v1"),
         api_key=os.getenv("LOCAL_API_KEY", "not-needed"),
         temperature=float(os.getenv("LOCAL_TEMPERATURE", "0.3")),
-        max_tokens=int(os.getenv("LOCAL_MAX_TOKENS", "24576")),
+        max_tokens=int(os.getenv("LOCAL_MAX_TOKENS", "32768")),
     ))
     default: str = os.getenv("DEFAULT_PROFILE", "cloud")
 

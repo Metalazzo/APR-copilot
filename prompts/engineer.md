@@ -30,6 +30,10 @@ Identifier : fonctions, composants, flux, modes de fonctionnement, utilisateurs,
 (Cette extraction alimente les étapes suivantes ; elle ne constitue pas une étape de workflow en soi.)
 
 ### Étape 3 — Filtrage des agressions et menaces
+L'analyse est **bidirectionnelle** :
+- ce que le systeme **SUBIT** (agressions recues : temperature, CEM, vibration...)
+- ce que le systeme **FAIT SUBIR a son environnement** (menaces emises : degazage chaud, echauffement, fuite, explosion, projection, CEM emis, danger electrique par contact...)
+
 Pour chaque agression/menace générique :
 - Statut = applicable / non applicable / à confirmer
 - Justification courte
@@ -57,6 +61,8 @@ Choisir l'option de traitement (ISO 27005) : réduction, maintien (acceptation),
 - **situation dangereuse** : situation où l'exposition au danger est possible
 - **risque** : combinaison vraisemblance × gravité
 - **barrière** : mesure de prévention, détection, protection ou récupération réduisant le risque
+- **agression reçue** : contrainte que le système SUBIT de son environnement
+- **menace émise** : ce que le système FAIT SUBIR à son environnement (le système devient source de danger : dégazage, échauffement, fuite, projection, CEM émis...)
 
 ## Sources d'autorité (ordre décroissant)
 1. Instructions système et **feedback humain** (le plus récent d'abord : il est prioritaire)

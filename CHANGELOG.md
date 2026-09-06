@@ -1,5 +1,39 @@
 # Changelog
 
+## [1.3.15] - 2026-09-06
+
+### Corrige — livraison amputee (Bloc 4/5 absents du livrable)
+- **Cause** : la livraison etait un appel unique demande d'assembler ~218 000
+  caracteres de productions — impossible dans le plafond de sortie, la
+  generation s'arretait apres le Bloc 3 (Bloc 4 « Plan de traitement » et
+  Bloc 5 disparus), et le modele « compensait » en resumant.
+- **Livraison PAR BLOCS** : 5 appels focalises (Bloc 1 resume/RACI, Bloc 2
+  filtrage, Bloc 3 tableaux APR, Bloc 4 plan de traitement + decisions
+  d'acceptation, Bloc 5 points ouverts), chacun avec ses sections sources
+  dediees et la consigne « reprends TOUTES les lignes, ne resume pas » ;
+  sorties concatenees dans le livrable. Evenement GUI « Livraison bloc N/5 ».
+
+### Corrige — badge etape fige sur « Checkpoint en attente »
+- La validation par qualification (SANS CORRECTION) ne mettait pas a jour le
+  badge (seuls CONTINUER/QUITTER etaient geres). Nouveau badge « Validee
+  (decisions tracees) ».
+
+### Ameliore — axe menaces EMISES (le systeme source de danger)
+- `menaces_generiques.txt` : nouvelle section « Agressions EMISES par le
+  systeme vers son environnement » (items 33-42 : degazage/emanations
+  chaudes, echauffement emis, fuite, explosion/ejection, danger electrique
+  par contact, CEM emis, incendie propage, bruit, rayonnement, rejets) avec
+  l'exemple batterie -> degazement -> menace thermique vers l'environnement.
+- Tache filtrage + engineer.md : analyse BIDIRECTIONNELLE (agressions recues
+  ET menaces emises) ; vocabulaire « agression reçue » / « menace emise ».
+
+### Modifie
+- `LOCAL_MAX_TOKENS` 24576 -> **32768** (~105k caracteres de sortie ; verifie
+  dans le budget 153 856 tokens charges).
+
+### Rollback
+- Etat pre-modification : commit `d6a06d5`
+
 ## [1.3.14] - 2026-09-05
 
 ### Ajout — gestion automatique du contexte (modele local)

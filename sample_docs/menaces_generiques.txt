@@ -43,3 +43,16 @@
 30. Intrusion physique dans l'enceinte
 31. Cyberattaque sur le SCADA
 32. Vol de materiel / cuivre
+
+### Agressions EMISES par le systeme vers son environnement (le systeme source de danger)
+Ce que le systeme fait subir a son environnement proche, aux autres equipements et au personnel.
+33. Degazage / emanations chaudes ou toxiques (ex. batterie : degazement tres chaud -> menace haute temperature vers l'environnement)
+34. Echauffement emis / flamme / projection incandescente
+35. Fuite de fluide (huile, electrolyte, fluide sous pression)
+36. Explosion / eclatement / ejection de pieces
+37. Danger electrique par contact (parties actives accessibles)
+38. Perturbations CEM emises vers d'autres equipements
+39. Incendie propage hors de l'enceinte du systeme
+40. Bruit emis (exposition du personnel)
+41. Rayonnement emis (ionisant / non ionisant)
+42. Rejets environnementaux (liquides, solides, gaz)
