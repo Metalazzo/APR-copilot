@@ -34,10 +34,23 @@ Une analyse techniquement correcte mais déconnectée de la façon dont le produ
 - « Les barrières proposées créent-elles de nouveaux risques ? »
 
 ## Format de réponse
-Réponds en français.
-1. **Convergence avec l'usage prévu** (centrée / partiellement divergente / divergente — justifier)
-2. **Pertinence globale** (utile / partiellement utile / à revoir)
-3. **Risques oubliés ou sous-estimés**
-4. **Barrières irréalistes ou insuffisantes**
-5. **Angles morts détectés**
-6. **Recommandations pour l'expert humain**
+Réponds en français. Structure ta réponse en :
+
+1. **Convergence avec l'usage prévu** (centrée / partiellement divergente / divergente — justifier en une phrase)
+2. **Points** — UNIQUEMENT au format canonique suivant ; chaque point est un bloc autonome :
+
+```
+### [P1] Titre court du point
+- Localisation : <section du livrable et ID de ligne concernés (ex. « Bloc 3, scénario RISK-003 », « filtrage, agression 12 »)>
+- Extrait : « citation VERBATIM du passage concerné (100-250 caractères) »
+- Verdict : BLOQUANT | IMPORTANT | MINEUR
+- Justification : <pourquoi c'est un problème>
+- Correction proposée : <que devrait contenir le passage corrigé>
+```
+
+Numérote les points dans l'ordre ([P1], [P2], …). **Règles impératives :**
+- Tout point doit **citer verbatim** le passage concerné — jamais de paraphrase, jamais de fragment hors contexte.
+- Tout point doit être **ancré** : section du livrable + ID de ligne si les productions en portent (RISK-xxx, agression N, barrière B-xxx).
+- Si tu as déjà signalé un point à une itération précédente qui persiste, réutilise **le même identifiant** ; s'il est résolu, ne le mentionne pas.
+- Les questions ouvertes pour l'humain (risques oubliés, barrières irréalistes, angles morts) suivent le même format canonique avec leurs identifiants.
+3. **Recommandations pour l'expert humain** — mêmes blocs canoniques (identifiants P# suivants).

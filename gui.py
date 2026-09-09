@@ -81,9 +81,55 @@ def _safe_notify(message: str, type_: str = "info") -> None:
         log.push(f"[notif] {message}")
 
 
-def _parse_review_points(review_text: str, max_items: int = 12) -> list[str]:
-    """Extrait les points a valider (lignes a puces / numerotees) de la relecture."""
+def _parse_review_points(review_text: str, max_items: int = 12) -> list[dict]:
+    """Extrait les points de la relecture au format canonique :
+
+        ### [P1] Titre court du point
+        - Localisation : ...
+        - Extrait : « ... »
+        - Verdict : ...
+        - Justification : ...
+        - Correction proposee : ...
+
+    Repli sur l'ancien heuristique (lignes a puces / numerotees, tronquees)
+    si le modele ne suit pas le format canonique : points sans identifiant."""
     import re
+
+    block_re = re.compile(r"^###\s*\[(P?\d+)\]\s*(.+)$", re.MULTILINE)
+    field_re = re.compile(r"^-\s*([^:]{2,24}):\s*(.*)$")
+    matches = list(block_re.finditer(review_text or ""))
+    points = []
+    for idx, m in enumerate(matches):
+        block = review_text[m.end(): matches[idx + 1].start() if idx + 1 < len(matches) else len(review_text)]
+        raw = m.group(1)
+        pid = f"P{int(raw[1:])}" if raw[1:].isdigit() else raw.upper()
+        p = {"id": pid, "titre": m.group(2).strip(),
+             "localisation": "", "extrait": "", "verdict": "",
+             "justification": "", "correction": ""}
+        for line in block.splitlines():
+            fm = field_re.match(line.strip())
+            if not fm:
+                continue
+            key = fm.group(1).strip().lower()
+            val = fm.group(2).strip().strip('«»"').strip()
+            if key.startswith("localisation"):
+                p["localisation"] = val
+            elif key.startswith("extrait"):
+                p["extrait"] = val
+            elif key.startswith("verdict"):
+                p["verdict"] = val[:40]
+            elif key.startswith("justification"):
+                p["justification"] = val
+            elif key.startswith("correction"):
+                p["correction"] = val
+        p["text"] = p["titre"]
+        points.append(p)
+        if len(points) >= max_items:
+            break
+    if points:
+        return points
+
+    # Repli : ancien heuristique a puces (points non structures)
     items = []
     for ln in (review_text or "").splitlines():
         s = ln.strip()
@@ -91,7 +137,10 @@ def _parse_review_points(review_text: str, max_items: int = 12) -> list[str]:
         if m:
             item = re.sub(r"\*+", "", m.group(1)).strip()
             if len(item) > 3 and not item.lower().startswith(("http", "source ")):
-                items.append(item[:200])
+                txt = item[:240]
+                items.append({"id": None, "titre": txt, "text": txt,
+                              "localisation": "", "extrait": "", "verdict": "",
+                              "justification": "", "correction": ""})
         if len(items) >= max_items:
             break
     return items
@@ -99,6 +148,23 @@ def _parse_review_points(review_text: str, max_items: int = 12) -> list[str]:
 
 checklist_rows: list = []              # lignes OK/KO detail de la popup en cours
 dialog_state: dict = {"maximized": False}
+decided_points_by_step: dict = {}      # step_id -> {point_id: {decision, text, detail, iteration}}
+
+
+def _split_decided_points(points: list[dict], decided: dict) -> tuple[list[dict], list[dict], set]:
+    """Separe les points d'une relecture en : (a nouveaux points a qualifier),
+    (b points deja qualifies aux iterations precedentes — non re-soumis) avec
+    marquage 're_signale' lorsque le relecteur le re-emet, et (c) les IDs de
+    la relecture courante. Un point deja decide n'est JAMAIS re-soumis."""
+    current_ids = {p.get("id") for p in points if p.get("id")}
+    new_points = [p for p in points if not (p.get("id") and p["id"] in decided)]
+    already = []
+    for pid, d in decided.items():
+        d = dict(d)
+        d.setdefault("id", pid)
+        d["re_signale"] = pid in current_ids
+        already.append(d)
+    return new_points, already, current_ids
 
 
 def _apply_dialog_size() -> None:
@@ -122,12 +188,21 @@ def toggle_maximize() -> None:
     _apply_dialog_size()
 
 
-async def gui_checkpoint(step_id: str, production: str, review: str, all_outputs: dict) -> str:
-    """human_callback : ouvre la popup de relecture/decision et attend la decision."""
+async def gui_checkpoint(
+    step_id: str, production: str, review: str, all_outputs: dict,
+    decided_points: dict | None = None,
+) -> str:
+    """human_callback : ouvre la popup de relecture/decision et attend la decision.
+
+    decided_points : qualifications humaines PAR POINT deja donnees aux
+    iterations precedentes de cette etape — les points concernes ne sont PAS
+    re-soumis a l'humain (ils sont affiches en lecture seule et traces dans le
+    rapport final)."""
     loop = asyncio.get_running_loop()
     fut = loop.create_future()
     pending_checkpoint["future"] = fut
     pending_checkpoint["step_id"] = step_id
+    decided_points_by_step[step_id] = decided_points or {}
     card = step_cards[step_id]
     card["badge"].set_text("Checkpoint en attente")
     card["badge"].props("color=deep-orange")
@@ -157,8 +232,33 @@ def _open_checkpoint_dialog(step_id: str) -> None:
     checklist_rows.clear()
     if pending_here:
         points = _parse_review_points(card.get("review_text") or "")
+        decided = decided_points_by_step.get(step_id, {})
+        new_points, already_points, current_ids = _split_decided_points(points, decided)
         with dlg_points_container:
-            if points:
+            # Points deja qualifies aux iterations precedentes : lecture seule,
+            # repris tels quels, jamais re-soumis a l'humain.
+            if already_points:
+                ui.label(
+                    "Points déjà qualifiés (itérations précédentes) — repris tels quels, "
+                    "tracés dans le rapport final :"
+                ).classes("text-subtitle2")
+                with ui.scroll_area().style(
+                    "height: 10vh; border-left: 3px solid #c8e6c9; padding-left: 8px"
+                ):
+                    for d in already_points:
+                        v = int(d.get("iteration", 0)) + 1
+                        dtxt = (d.get("text") or d.get("titre") or "")[:140]
+                        ddet = (d.get("detail") or "").strip()
+                        label = f"[{d.get('id')}] {d.get('decision', '?')} — {dtxt} — V{v}"
+                        if d.get("re_signale"):
+                            label += " (re-signalé par le relecteur mais conservé)"
+                        with ui.row().classes("w-full items-center no-wrap"):
+                            ui.icon("check_circle", color="grey").style("font-size: 14px")
+                            ui.label(label).classes("grow text-caption")
+                            if ddet:
+                                ui.label(f"({ddet[:80]})").classes("text-caption text-grey")
+            # Points a qualifier : enrichis (extra it verbatim, localisation, verdict).
+            if new_points:
                 ui.label("Points soulevés par la relecture — qualifiez chacun :").classes(
                     "text-subtitle2"
                 )
@@ -168,10 +268,19 @@ def _open_checkpoint_dialog(step_id: str) -> None:
                     "dans le livrable sans re-génération."
                 ).classes("text-caption text-grey")
                 with ui.scroll_area().style(
-                    "height: 16vh; border-left: 3px solid #ddd; padding-left: 8px"
+                    "height: 28vh; border-left: 3px solid #ddd; padding-left: 8px"
                 ):
-                    for pt in points:
-                        with ui.row().classes("w-full items-center no-wrap"):
+                    for pt in new_points:
+                        title = pt.get("titre") or pt.get("text", "")
+                        verdict = (pt.get("verdict") or "").upper()
+                        vcolor = {"BLOQUANT": "red", "IMPORTANT": "orange",
+                                  "MINEUR": "grey"}.get(verdict, "grey")
+                        prefix = f"{pt['id']} " if pt.get("id") else ""
+                        with ui.row().classes(
+                            "w-full items-center no-wrap gap-2"
+                        ).style("border-top: 1px solid #eee; padding-top: 6px"):
+                            if verdict:
+                                ui.badge(verdict, color=vcolor).props("dense")
                             tog = ui.toggle(
                                 {
                                     "corriger": "À corriger",
@@ -180,18 +289,25 @@ def _open_checkpoint_dialog(step_id: str) -> None:
                                 },
                                 clearable=True,
                             ).props("dense")
-                            ui.label(pt).classes(
-                                "grow text-caption"
-                            ).style(
-                                "overflow: hidden; text-overflow: ellipsis; white-space: nowrap"
+                            ui.label(prefix + title).classes("grow text-body2")
+                        if pt.get("extrait"):
+                            ui.label("Extrait :").classes("text-caption text-grey")
+                            ui.code(pt["extrait"].strip()).classes("w-full").style(
+                                "white-space: pre-wrap; font-size: 12px; padding: 4px 8px"
                             )
-                            det = ui.input(placeholder="detail / justification").props(
-                                "dense outlined"
-                            ).style("width: 300px")
+                        with ui.row().classes("w-full items-center gap-2"):
+                            if pt.get("localisation"):
+                                ui.label(f"📍 {pt['localisation']}").classes(
+                                    "text-caption text-grey"
+                                )
+                            det = ui.input(
+                                placeholder="detail / justification"
+                            ).props("dense outlined").style("width: 320px")
                         checklist_rows.append(
-                            {"text": pt, "toggle": tog, "detail": det}
+                            {"id": pt.get("id"), "text": title, "toggle": tog,
+                             "detail": det}
                         )
-            else:
+            if not new_points and not decided:
                 ui.label(
                     "Aucun point liste detecte dans la relecture — utilisez le "
                     "feedback global ci-dessous."
@@ -244,7 +360,8 @@ def send_feedback() -> None:
         detail = (row["detail"].value or "").strip()
         label = {"corriger": "A CORRIGER", "sans_objet": "SANS OBJET",
                  "deja_traite": "DEJA TRAITE"}[choice]
-        line = f"- [{label}] {row['text']}"
+        pid = row.get("id")
+        line = f"- [{label}] " + (f"[{pid}] " if pid else "") + row["text"]
         if detail:
             line += f" — {detail}"
         qualified.append(line)
@@ -704,6 +821,8 @@ def build_page() -> None:
         # ------------------------- Colonne workflow -------------------------
         with ui.column().classes("col-grow"):
             ui.label("Workflow").classes("text-h6")
+            step_cards.clear()
+            decided_points_by_step.clear()
             for step in WORKFLOW_STEPS:
                 with ui.card().classes("w-full"):
                     with ui.row().classes("w-full items-center justify-between"):

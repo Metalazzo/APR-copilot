@@ -94,12 +94,20 @@ async def analyze_command(args):
     client_wrapper = ClientAgent(cloud_client)
     secretary_wrapper = SecretaryAgent(local_client)
 
-    async def interactive_checkpoint(step_id: str, production: str, review: str, all_outputs: dict) -> str:
+    async def interactive_checkpoint(
+        step_id: str, production: str, review: str, all_outputs: dict,
+        decided_points: dict | None = None,
+    ) -> str:
         print(f"\n--- Production ({step_id}) ---")
         print(production[:2000])
         if review:
             print(f"\n--- Relecture ---")
             print(review[:1000])
+        if decided_points:
+            print(f"\n--- Points deja qualifies (non re-soumis) ---")
+            for pid, d in decided_points.items():
+                print(f"  [{pid}] {d.get('decision', '?')} — "
+                      f"{(d.get('text') or '')[:100]} (V{int(d.get('iteration', 0)) + 1})")
         print()
         response = input(f">>> [Point de controle] CONTINUER / QUITTER / feedback : ")
         return response

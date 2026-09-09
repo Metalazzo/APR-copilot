@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.3.16] - 2026-09-09
+
+### Ameliore — relecture ancree et lisible (points de controle humains)
+
+Le probleme : les points de la relecture etaient des fragments de phrases
+decontextualises (lignes a puces melangees, tronquees a 200 caracteres), sans
+lien avec la production, et le feedback reparti vers l'Ingenieur perdait toute
+ancre.
+
+- **Format canonique des points** (`prompts/quality.md`, `prompts/client.md`) :
+  chaque point est un bloc structure obligatoire avec identifiant [P#],
+  Localisation (section + ID de ligne), Extrait VERBATIM du passage concerne,
+  Verdict (BLOQUANT/IMPORTANT/MINEUR), Justification, Correction proposee.
+- **Rappel du format** dans les 4 consignes de relecture (orchestrator), avec
+  regle « tous les points sont ancres et cites verbatim — jamais de paraphrase
+  hors contexte ».
+- **GUI enrichie** : parseur des blocs structurees (repli sur l'ancien
+  heuristique si le modele ne suit pas le format) ; chaque point qualifiable
+  affiche badge de verdict, titre complet, extrait en citation et localisation ;
+  le feedback compose conserve les identifiants [P#].
+- **Traçabilité inter-iterations** : les qualifications humaines par point sont
+  enregistrees dans l'etat (persistant entre les iterations d'une etape) ;
+  les relectures suivantes recovent les points deja decides (IDs stables,
+  mention PERSISTE) ; un point deja qualifie n'est **jamais re-soumis** a
+  l'humain (affiche en lecture seule dans la popup, repris tel quel).
+- **Trace dans le rapport final** : Bloc 5 inclut la table de traçabilite des
+  points de controle (etape | point | decision | detail | version) pour
+  remonter au « pourquoi » de chaque conclusion.
+
+### Rollback
+- Etat pre-modification : commit `8d30538`
+
 ## [1.3.15] - 2026-09-06
 
 ### Corrige — livraison amputee (Bloc 4/5 absents du livrable)

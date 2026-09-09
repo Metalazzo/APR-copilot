@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Optional, Callable, Awaitable
@@ -59,6 +60,49 @@ def _auto_context_limit() -> Optional[int]:
     _AUTO_CONTEXT_CACHE["limit"] = limit
     _AUTO_CONTEXT_CACHE["ctx"] = ctx
     return limit
+
+
+# ---------------------------------------------------------------------------
+# Qualifications humaines par point de relecture (traçabilité inter-iterations)
+# ---------------------------------------------------------------------------
+
+_POINT_LINE_RE = re.compile(
+    r"^-\s*\[(A CORRIGER|SANS OBJET|DEJA TRAITE)\]\s*"
+    r"(?:\[(P?\d+)\]\s*)?(?P<text>.+)$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def parse_point_feedback(feedback: str, iteration: int = 0) -> list[dict]:
+    """Extrait les qualifications humaines par point d'un feedback structure.
+
+    Format produit par la GUI (send_feedback) :
+        - [A CORRIGER] [P1] Titre du point — detail
+        - [SANS OBJET] Point sans identifiant (repli non structure) — detail
+
+    Retourne une liste de dicts {id, text, detail, decision, iteration}.
+    """
+    decisions = []
+    for m in _POINT_LINE_RE.finditer(feedback or ""):
+        decision = m.group(1).upper()
+        raw_id = m.group(2)
+        pid = None
+        if raw_id and raw_id[1:].isdigit():
+            pid = f"P{int(raw_id[1:])}"
+        elif raw_id:
+            pid = raw_id.upper()
+        line = m.group("text").strip().rstrip(".")
+        detail = ""
+        if " — " in line:
+            line, detail = line.split(" — ", 1)
+        decisions.append({
+            "id": pid,
+            "text": line.strip(),
+            "detail": detail.strip(),
+            "decision": decision,
+            "iteration": iteration,
+        })
+    return decisions
 
 
 WORKFLOW_STEPS = [
@@ -358,6 +402,11 @@ class OrchestratorState:
     outputs: dict = field(default_factory=dict)
     reviews: dict = field(default_factory=dict)
     human_validations: dict = field(default_factory=dict)
+    # Qualifications humaines PAR POINT de relecture, persistant entre les
+    # iterations d'une meme etape : {step_id: {point_id: {decision, text,
+    # detail, iteration}}}. Les points deja decides ne sont pas re-soumis a
+    # l'humain et sont traces dans le livrable (Bloc 5).
+    point_decisions: dict = field(default_factory=dict)
     analysis_state: AnalysisState = field(default_factory=AnalysisState)
 
 
@@ -641,6 +690,12 @@ class RiskAnalysisOrchestrator:
             if txt and txt not in ("validated", "quit")
         ]
         if decisions:
+            # Bloc 5 : la table de traçabilité par point (le « pourquoi » des
+            # conclusions) est la source principale ; les textes bruts completent.
+            if bloc["id"] == "bloc5":
+                trace = self._points_trace_section()
+                if trace:
+                    parts.append(trace)
             parts.append(
                 "## Decisions et feedbacks humains enregistres aux points de controle\n"
                 + "\n\n".join(decisions)
@@ -720,15 +775,83 @@ class RiskAnalysisOrchestrator:
                 f"sont bien integrees dans la production ci-dessus.\n"
                 f"{human_feedback}\n\n"
             )
-        review_task += f"## Consigne de relecture\n{reviewer_task_template}"
+        previous_points = self.state.point_decisions.get(step["id"], {})
+        if previous_points:
+            rows = "\n".join(
+                f"- [{p.get('id') or key}] decision : {p.get('decision', '')} "
+                f"— {p.get('text', '')[:100]}{(' (detail : ' + p['detail'][:100] + ')') if p.get('detail') else ''}"
+                for key, p in previous_points.items()
+            )
+            review_task += (
+                f"## Points deja qualifies par l'humain (iterations precedentes)\n"
+                f"{rows}\n"
+                f"Regles :\n"
+                f"- Si un de ces points PERSISTE dans la production actuelle, re-emets-le "
+                f"avec le MEME identifiant [P#] et mentionne 'PERSISTE' dans sa justification.\n"
+                f"- S'il est resolu, ne le mentionne pas.\n"
+                f"- Les nouveaux points prennent la premiere numerotation libre.\n\n"
+            )
+        review_task += (
+            f"## Consigne de relecture\n{reviewer_task_template}\n\n"
+            f"## Format des points\n"
+            f"Chaque point souleve suit le format canonique defini dans ton prompt "
+            f"systeme :\n"
+            f"### [P#] Titre court du point\n"
+            f"- Localisation : <section du livrable et ID de ligne concernes>\n"
+            f"- Extrait : « citation VERBATIM du passage concerne (100-250 caracteres) »\n"
+            f"- Verdict : BLOQUANT | IMPORTANT | MINEUR\n"
+            f"- Justification : ...\n"
+            f"- Correction proposee : ...\n"
+            f"Tout point doit citer verbatim le passage concerne et etre ancre a une "
+            f"section ou un ID de la production — jamais de paraphrase hors contexte."
+        )
         return await self._ask_agent(reviewer, review_task)
 
     async def _human_checkpoint(self, step: dict, engineer_output: str, review_output: str) -> str:
         if self.human_callback:
             return await self.human_callback(
-                step["id"], engineer_output, review_output, self.state.outputs
+                step["id"], engineer_output, review_output, self.state.outputs,
+                self.state.point_decisions.get(step["id"], {}),
             )
         return "CONTINUER"
+
+    def _record_point_decisions(self, step_id: str, feedback: str, iteration: int) -> None:
+        """Enregistre les qualifications humaines par point (persistant entre
+        iterations : un point decide n'est jamais re-soumis a l'humain)."""
+        store = self.state.point_decisions.setdefault(step_id, {})
+        for pd in parse_point_feedback(feedback, iteration):
+            key = pd["id"] or f"p_{len(store) + 1}"
+            store[key] = pd
+
+    def _points_trace_section(self) -> str:
+        """Table de traçabilité des qualifications humaines par point.
+
+        C'est la justification tracée des conclusions : pour chaque point
+        soulevé par les relectures, la qualification humaine et la version de
+        la production où elle a été donnée."""
+        rows = []
+        for step_id, points in self.state.point_decisions.items():
+            step_name = self._step_name(step_id)
+            for key, p in points.items():
+                pid = p.get("id") or key
+                text = (p.get("text") or "").replace("|", "/")[:110]
+                detail = (p.get("detail") or "").replace("|", "/")[:110]
+                rows.append(
+                    f"| {step_name} | {pid} | {p.get('decision', '')} | "
+                    f"{text}{(' — ' + detail) if detail else ''} | "
+                    f"V{p.get('iteration', 0) + 1} |"
+                )
+        if not rows:
+            return ""
+        return (
+            "## Traçabilité des points de contrôle (qualifications humaines)\n"
+            "Table de décision : pour chaque point soulevé par les relectures, la "
+            "qualification humaine (à corriger / sans objet / déjà traité), le détail "
+            "donné et la version où elle a été prise — c'est le « pourquoi » des "
+            "conclusions du rapport.\n\n"
+            "| Etape | Point | Decision | Detail | Version |\n"
+            "| --- | --- | --- | --- | --- |\n" + "\n".join(rows)
+        )
 
     async def run_full_analysis(self, initial_context: str = "") -> dict:
         all_outputs = {}
@@ -859,12 +982,14 @@ class RiskAnalysisOrchestrator:
                     # Points de la relecture qualifies par l'humain en
                     # 'Sans objet' / 'Deja traite' : rien a corriger, l'etape
                     # est validee et les decisions sont tracees.
+                    self._record_point_decisions(step["id"], feedback, iteration)
                     self.state.human_validations[step["id"]] = (
                         self._feedback_section(feedbacks + [feedback])
                     )
                     print(">> Etape validee (points de la relecture qualifies, sans correction).")
                     break
 
+                self._record_point_decisions(step["id"], feedback, iteration)
                 feedbacks.append(feedback)
                 self.state.human_validations[step["id"]] = feedback
                 iteration += 1
