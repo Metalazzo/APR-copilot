@@ -187,9 +187,22 @@ dans `settings.yml`, puis `SEARXNG_URL=http://localhost:8888`.
 python gui.py
 ```
 
-Ouvre un navigateur sur `http://localhost:8080` : choix du profil (hybride/cloud/local),
-liste des modeles LM Studio en direct, parametres (temperature, max_tokens, tool calling),
-gestion du RAG (ingestion, statut), lancement d'analyse avec affichage en direct des etapes
+Interface **par onglets** (v1.3.18) : 1 onglet par etape (production repliable,
+relecture en cartes de points, qualification inline), tiroirs bas (Journal,
+Documents RAG, Sessions, Reglages). Le navigateur s'ouvre sur l'**IP LAN** de la
+machine — `localhost:8080` pouvant etre tenu par le serveur llama.cpp ; IP
+imposable via `GUI_OPEN_HOST` (ex. `192.168.1.95`), ou `--no-show` pour ne rien
+ouvrir.
+
+- **Ajout de documents pendant l'analyse** : tiroir « Documents RAG » — ajoutez
+  le document pendant un checkpoint, puis **citez le passage utile dans le
+  feedback** ; l'etape suivante et les re-generations le verront via le RAG,
+  la provenance est tracee dans le livrable (Bloc 5)
+- **Interface precedente** (cartes + popup) : `python gui_classic.py`
+
+Gestion : profil (hybride/cloud/local), liste des modeles LM Studio en direct,
+parametres (temperature, max_tokens, tool calling), sessions sauvegardees
+(reprise avec changement de modele), statistiques par etape.
 et points de controle interactifs (CONTINUER / QUITTER / feedback).
 
 Options : `--port 8090`, `--no-show`, `--reload` (dev).

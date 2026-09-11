@@ -415,6 +415,9 @@ class OrchestratorState:
     call_stats: list = field(default_factory=list)
     # Modele producteur par etape (traçabilite de provenance)
     models_used: dict = field(default_factory=dict)
+    # Documents ajoutes au RAG PENDANT l'analyse (reponses aux questions de
+    # relecture) : [{ts, directory}] — traces pour la reprise et le livrable
+    added_docs: list = field(default_factory=list)
     # Horodatages de session (debut / fin d'analyse)
     t_start: str = ""
     t_end: str = ""
@@ -431,6 +434,7 @@ class OrchestratorState:
             "point_decisions": self.point_decisions,
             "call_stats": list(self.call_stats),
             "models_used": dict(self.models_used),
+            "added_docs": list(self.added_docs),
             "t_start": self.t_start,
             "t_end": self.t_end,
             "analysis_state": asdict(self.analysis_state),
@@ -451,6 +455,7 @@ class OrchestratorState:
         st.point_decisions = dict(data.get("point_decisions", {}) or {})
         st.call_stats = list(data.get("call_stats", []) or [])
         st.models_used = dict(data.get("models_used", {}) or {})
+        st.added_docs = list(data.get("added_docs", []) or [])
         st.t_start = data.get("t_start", "") or ""
         st.t_end = data.get("t_end", "") or ""
         try:
@@ -795,6 +800,16 @@ class RiskAnalysisOrchestrator:
                 trace = self._points_trace_section()
                 if trace:
                     parts.append(trace)
+                if self.state.added_docs:
+                    docs = "\n".join(
+                        f"- {d.get('ts', '')} : {d.get('directory', '')}"
+                        for d in self.state.added_docs
+                    )
+                    parts.append(
+                        "## Documents ajoutes au RAG pendant l'analyse\n"
+                        "(reponses apportees aux questions de relecture — mentionner "
+                        "leur provenance dans le livrable si utilisees)\n" + docs
+                    )
             parts.append(
                 "## Decisions et feedbacks humains enregistres aux points de controle\n"
                 + "\n\n".join(decisions)

@@ -1,5 +1,43 @@
 # Changelog
 
+## [1.3.18] - 2026-09-11
+
+### Ajoute — GUI par onglets (maquette A), documents a chaud, ouverture sur l'IP LAN
+
+**Interface classique archivee** : `gui_classic.py` (copie figee et autonome de
+v1.3.17, memes capacites backend) — rollback permanent, lancement :
+`python gui_classic.py`.
+
+**GUI par onglets (maquette A)** dans `gui.py` :
+- 1 onglet par etape (Cadrage / Filtrage / Scenarios / Barrieres / Livraison),
+  auto-selectionne a chaque step_start
+- Production repliable + plein ecran (overlay lecture 97vw)
+- Relecture affichee en CARTES de points dans l'onglet : badge de verdict
+  (BLOQUANT/IMPORTANT/MINEUR), extrait verbatim en citation, localisation,
+  justification, correction proposee, toggles de qualification + detail
+- Qualification inline : **plus de popup de checkpoint** — production au-dessus,
+  points en dessous, decision dans le meme onglet ; les points deja qualifies
+  (iterations precedentes) restent en lecture seule, non re-soumis
+- Barre de decision masquee hors checkpoint ; bouton « Voir la relecture » pour
+  la consultation d'une etape passee
+
+**Tiroirs bas** : Journal · Documents RAG · Sessions sauvegardees · Reglages &
+lancement (tous repliables).
+
+**Documents a chaud pendant l'analyse** :
+- le tiroir Documents RAG reste utilisable pendant un checkpoint : ingestion
+  thread separe, embeddings locaux, invalidation BM25
+- reset de l'index **interdit pendant l'analyse** (garde-fou)
+- chaque ajout est trace dans la session (`state.added_docs`) : l'encart de
+  qualification rappelle « citez le passage utile dans votre feedback », le
+  feedback envoye mentionne les documents ajoutes, et le Bloc 5 du livrable
+  trace leur provenance
+
+**Ouverture navigateur sur l'IP LAN** : detection automatique (socket route +
+repli hostname) — le popup 'chat' du serveur llama.cpp sur localhost:8080 est
+desormais evite ; surcharge via `GUI_OPEN_HOST`, desactivation via `--no-show`
+(l'URL effective est affichee en console).
+
 ## [1.3.17] - 2026-09-11
 
 ### Ajoute — sessions sauvegardables, reprise et statistiques

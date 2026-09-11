@@ -1,17 +1,15 @@
 """Interface graphique (NiceGUI) pour le Risk Analysis Copilot APR.
 
-Lancement :
-    python gui.py            (ouvre le navigateur sur http://localhost:8080)
-    python gui.py --no-show  (sans ouvrir le navigateur)
-    python gui.py --port 8090
+Layout v1.3.18 « par onglets » (maquette A) :
+    - 1 onglet par etape : production repliable, relecture en cartes de points,
+      qualification inline (plus de popup de checkpoint)
+    - tiroirs bas : Journal, Documents RAG (ajout possible PENDANT l'analyse),
+      Sessions sauvegardees, Reglages
+    - ouverture du navigateur sur l'IP LAN (localhost:8080 peut etre occupe par
+      le serveur llama.cpp)
 
-Fonctions :
-- Choix du mode d'affectation (hybride / cloud / local)
-- Modeles LM Studio listes en direct depuis le serveur (bouton rafraichir)
-- Parametres : temperature, max_tokens, tool calling, timeout
-- Gestion de la base documentaire RAG (ingestion, statut)
-- Lancement d'une analyse avec affichage en direct des etapes
-- Points de controle humains interactifs (CONTINUER / QUITTER / feedback)
+Interface precedente (cartes + popup) preservee dans gui_classic.py :
+    python gui_classic.py
 
 La CLI (main.py) reste inchangee et fonctionnelle.
 """
@@ -21,6 +19,7 @@ import asyncio
 import json
 import os
 import re
+import socket
 import urllib.request
 from pathlib import Path
 
@@ -83,7 +82,7 @@ def _cloud_profile() -> ModelProfile:
 
 
 def _fmt_phase_line(phase: dict, totals: dict | None = None) -> str:
-    """Ligne de statistiques de phase (carte d'etape)."""
+    """Ligne de statistiques de phase (onglet de l'etape)."""
     if not phase or not phase.get("calls"):
         return ""
     parts = [
@@ -123,14 +122,18 @@ def _fmt_totals_line(totals: dict) -> str:
 pending_checkpoint: dict = {}          # {"future": Future, "step_id": str}
 analysis_running: bool = False
 step_cards: dict[str, dict] = {}       # step_id -> elements UI
+decision_rows: dict[str, dict] = {}    # step_id -> barre de decision
+step_tabs: dict[str, object] = {}      # step_id -> element onglet
+tabs = None                            # ui.tabs, cree dans build_page()
 log = None                             # ui.log, cree dans build_page()
-checkpoint_dialog = None               # ui.dialog, creee dans build_page()
-sessions_container = None              # ui.column du panneau Sessions
+sessions_container = None              # ui.column du tiroir Sessions
+current_orchestrator = None            # orchestrateur en cours (trace docs)
+fs_dialog = None                       # ui.dialog plein ecran production
+fs_md = None                           # markdown plein ecran
+fs_title = None
+checklist_rows: list = []              # lignes de qualification en cours
+decided_points_by_step: dict = {}      # step_id -> {point_id: {decision, text, detail, iteration}}
 
-
-# ---------------------------------------------------------------------------
-# Handlers checkpoint (popup de relecture / decision)
-# ---------------------------------------------------------------------------
 
 def _safe_notify(message: str, type_: str = "info") -> None:
     """ui.notify exige un contexte NiceGUI (slot) ; depuis une tache de fond
@@ -159,14 +162,10 @@ def _parse_review_points(review_text: str, max_items: int = 100) -> list[dict]:
        crochets) suivis des champs Localisation/Extrait/Verdict/Justification/
        Correction (tolere le gras et l'extrait renvoye a la ligne suivante).
     2) Puces/numerations HORS des blocs canoniques : un relecteur peut
-       melanger les formats — v1.3.16 les ignorait des que des blocs
-       canoniques existaient (points manquants dans la popup, ex. 18 listes
-       mais seulement 15 qualifiables).
+       melanger les formats — les ignorer perd des points de qualification.
 
     Points retournes dans l'ordre du document. Plafond large (100) : un
     point laisse de cote est un point que l'humain ne peut pas qualifier."""
-    import re
-
     text = review_text or ""
     blocks = list(_CANON_BLOCK_RE.finditer(text))
     lines_info = []
@@ -253,11 +252,6 @@ def _parse_review_points(review_text: str, max_items: int = 100) -> list[dict]:
     return [p for _, p in points[:max_items]]
 
 
-checklist_rows: list = []              # lignes OK/KO detail de la popup en cours
-dialog_state: dict = {"maximized": False}
-decided_points_by_step: dict = {}      # step_id -> {point_id: {decision, text, detail, iteration}}
-
-
 def _split_decided_points(points: list[dict], decided: dict) -> tuple[list[dict], list[dict], set]:
     """Separe les points d'une relecture en : (a nouveaux points a qualifier),
     (b points deja qualifies aux iterations precedentes — non re-soumis) avec
@@ -274,109 +268,67 @@ def _split_decided_points(points: list[dict], decided: dict) -> tuple[list[dict]
     return new_points, already, current_ids
 
 
-def _apply_dialog_size() -> None:
-    border_p = "border-left: 3px solid #1976d2; padding-left: 8px; "
-    border_r = "border-left: 3px solid #f9a825; padding-left: 8px; "
-    if dialog_state["maximized"]:
-        dlg_card.style("width: 97vw; height: 94vh; overflow: auto")
-        dlg_prod_scroll.style(border_p + "height: 62vh")
-        dlg_review_scroll.style(border_r + "height: 62vh")
-    else:
-        dlg_card.style(
-            "width: 1650px; max-width: 96vw; height: 90vh; resize: both; overflow: auto"
-        )
-        dlg_prod_scroll.style(border_p + "height: 40vh")
-        dlg_review_scroll.style(border_r + "height: 40vh")
-    btn_maximize.props("icon=fullscreen_exit" if dialog_state["maximized"] else "icon=fullscreen")
+# ---------------------------------------------------------------------------
+# Checkpoints (qualification inline dans l'onglet de l'etape)
+# ---------------------------------------------------------------------------
 
-
-def toggle_maximize() -> None:
-    dialog_state["maximized"] = not dialog_state["maximized"]
-    _apply_dialog_size()
-
-
-async def gui_checkpoint(
-    step_id: str, production: str, review: str, all_outputs: dict,
-    decided_points: dict | None = None,
-) -> str:
-    """human_callback : ouvre la popup de relecture/decision et attend la decision.
-
-    decided_points : qualifications humaines PAR POINT deja donnees aux
-    iterations precedentes de cette etape — les points concernes ne sont PAS
-    re-soumis a l'humain (ils sont affiches en lecture seule et traces dans le
-    rapport final)."""
-    loop = asyncio.get_running_loop()
-    fut = loop.create_future()
-    pending_checkpoint["future"] = fut
-    pending_checkpoint["step_id"] = step_id
-    decided_points_by_step[step_id] = decided_points or {}
-    card = step_cards[step_id]
-    card["badge"].set_text("Checkpoint en attente")
-    card["badge"].props("color=deep-orange")
-    log.push(f"[Checkpoint] {step_id} : decision requise dans la popup")
-    _safe_notify(f"Point de controle atteint : {step_id}")
-    _open_checkpoint_dialog(step_id)
-    return await fut
-
-
-def _open_checkpoint_dialog(step_id: str) -> None:
-    """Ouvre la popup pour l'etape donnee ; les boutons de decision ne sont
-    visibles que si un checkpoint est en attente sur CETTE etape."""
-    card = step_cards.get(step_id)
-    if card is None:
+def _set_decision_bar(step_id: str, visible: bool) -> None:
+    row = decision_rows.get(step_id)
+    if not row:
         return
-    pending_here = (
-        pending_checkpoint.get("step_id") == step_id
-        and pending_checkpoint.get("future") is not None
-    )
-    version = int(card.get("iteration", 0)) + 1  # V1 = premiere production, V2 = 1re re-generation...
-    dlg_title.set_text(f"Point de contrôle — {card['name']} — version V{version}")
-    dlg_prod_md.set_content(card.get("production_text") or "*Production non generee*")
-    dlg_review_md.set_content(card.get("review_text") or "*Aucune relecture*")
-    ph = card.get("phase_stats") or {}
-    dlg_stats.set_text(
-        f"Performance de l'étape : {ph.get('calls', 0)} appel(s) · "
-        f"{ph.get('gen_time_s', 0):.0f} s de génération · "
-        f"{ph.get('tokens_in', 0):,} tok in / {ph.get('tokens_out', 0):,} tok out"
-        + (f" · {ph['tok_s']} tok/s" if ph.get("tok_s") else "")
-        + (f" · {', '.join(ph['models'])}" if ph.get("models") else "")
-    )
-    dlg_stats.classes("text-caption text-grey")
+    row["feedback"].set_visibility(visible)
+    row["btn_continue"].set_visibility(visible)
+    row["btn_quit"].set_visibility(visible)
+    row["btn_feedback"].set_visibility(visible)
+    row["status"].set_visibility(visible)
 
-    # Qualification des points souleves par la relecture (semantique explicite)
-    dlg_points_container.clear()
-    checklist_rows.clear()
-    if pending_here:
-        points = _parse_review_points(card.get("review_text") or "")
-        n_canon = sum(1 for p in points if p.get("id"))
+
+def _render_step_points(step_id: str, interactive: bool) -> None:
+    """Affiche la relecture dans l'onglet de l'etape.
+
+    interactive=True : qualification (toggles + details) + barre de decision.
+    interactive=False : consultation (points + decisions tracees, lecture seule).
+    """
+    card = step_cards.get(step_id)
+    if card is None or card.get("points_container") is None:
+        return
+    review_text = card.get("review_text") or ""
+    points = _parse_review_points(review_text)
+    n_canon = sum(1 for p in points if p.get("id"))
+    decided = decided_points_by_step.get(step_id, {})
+    new_points, already_points, current_ids = _split_decided_points(points, decided)
+
+    if interactive:
         log.push(f"[relecture] {len(points)} point(s) detecte(s) "
                  f"({n_canon} canonique(s), {len(points) - n_canon} en repli)")
-        decided = decided_points_by_step.get(step_id, {})
-        new_points, already_points, current_ids = _split_decided_points(points, decided)
-        with dlg_points_container:
-            # Points deja qualifies aux iterations precedentes : lecture seule,
-            # repris tels quels, jamais re-soumis a l'humain.
-            if already_points:
-                ui.label(
-                    "Points déjà qualifiés (itérations précédentes) — repris tels quels, "
-                    "tracés dans le rapport final :"
-                ).classes("text-subtitle2")
-                with ui.scroll_area().style(
-                    "height: 10vh; border-left: 3px solid #c8e6c9; padding-left: 8px"
-                ):
-                    for d in already_points:
-                        v = int(d.get("iteration", 0)) + 1
-                        dtxt = (d.get("text") or d.get("titre") or "")[:140]
-                        ddet = (d.get("detail") or "").strip()
-                        label = f"[{d.get('id')}] {d.get('decision', '?')} — {dtxt} — V{v}"
-                        if d.get("re_signale"):
-                            label += " (re-signalé par le relecteur mais conservé)"
-                        with ui.row().classes("w-full items-center no-wrap"):
-                            ui.icon("check_circle", color="grey").style("font-size: 14px")
-                            ui.label(label).classes("grow text-caption")
-                            if ddet:
-                                ui.label(f"({ddet[:80]})").classes("text-caption text-grey")
-            # Points a qualifier : enrichis (extra it verbatim, localisation, verdict).
+
+    container = card["points_container"]
+    container.clear()
+    with container:
+        # Points deja qualifies aux iterations precedentes : lecture seule,
+        # repris tels quels, jamais re-soumis a l'humain.
+        if already_points:
+            ui.label(
+                "Points déjà qualifiés (itérations précédentes) — repris tels quels, "
+                "tracés dans le rapport final :"
+            ).classes("text-subtitle2")
+            with ui.scroll_area().style(
+                "height: 9vh; border-left: 3px solid #c8e6c9; padding-left: 8px"
+            ):
+                for d in already_points:
+                    v = int(d.get("iteration", 0)) + 1
+                    dtxt = (d.get("text") or d.get("titre") or "")[:140]
+                    ddet = (d.get("detail") or "").strip()
+                    label = f"[{d.get('id')}] {d.get('decision', '?')} — {dtxt} — V{v}"
+                    if d.get("re_signale"):
+                        label += " (re-signalé par le relecteur mais conservé)"
+                    with ui.row().classes("w-full items-center no-wrap"):
+                        ui.icon("check_circle", color="grey").style("font-size: 14px")
+                        ui.label(label).classes("grow text-caption")
+                        if ddet:
+                            ui.label(f"({ddet[:80]})").classes("text-caption text-grey")
+
+        if interactive:
             if new_points:
                 ui.label(
                     f"Points soulevés par la relecture ({len(new_points)}) — "
@@ -396,68 +348,119 @@ def _open_checkpoint_dialog(step_id: str) -> None:
                         vcolor = {"BLOQUANT": "red", "IMPORTANT": "orange",
                                   "MINEUR": "grey"}.get(verdict, "grey")
                         prefix = f"{pt['id']} " if pt.get("id") else ""
-                        with ui.row().classes(
-                            "w-full items-center no-wrap gap-2"
-                        ).style("border-top: 1px solid #eee; padding-top: 6px"):
-                            if verdict:
-                                ui.badge(verdict, color=vcolor).props("dense")
-                            tog = ui.toggle(
-                                {
-                                    "corriger": "À corriger",
-                                    "sans_objet": "Sans objet",
-                                    "deja_traite": "Déjà traité",
-                                },
-                                clearable=True,
-                            ).props("dense")
-                            ui.label(prefix + title).classes("grow text-body2")
-                        if pt.get("extrait"):
-                            ui.label("Extrait :").classes("text-caption text-grey")
-                            ui.code(pt["extrait"].strip()).classes("w-full").style(
-                                "white-space: pre-wrap; font-size: 12px; padding: 4px 8px"
-                            )
-                        with ui.row().classes("w-full items-center gap-2"):
-                            if pt.get("localisation"):
-                                ui.label(f"📍 {pt['localisation']}").classes(
-                                    "text-caption text-grey"
+                        with ui.card().classes("w-full q-pa-sm"):
+                            with ui.row().classes("w-full items-center no-wrap gap-2"):
+                                if verdict:
+                                    ui.badge(verdict, color=vcolor).props("dense")
+                                tog = ui.toggle(
+                                    {
+                                        "corriger": "À corriger",
+                                        "sans_objet": "Sans objet",
+                                        "deja_traite": "Déjà traité",
+                                    },
+                                    clearable=True,
+                                ).props("dense")
+                                ui.label(prefix + title).classes("grow text-body2")
+                            if pt.get("extrait"):
+                                ui.label("Extrait :").classes("text-caption text-grey")
+                                ui.code(pt["extrait"].strip()).classes("w-full").style(
+                                    "white-space: pre-wrap; font-size: 12px; padding: 4px 8px"
                                 )
-                            det = ui.input(
-                                placeholder="detail / justification"
-                            ).props("dense outlined").style("width: 320px")
-                        checklist_rows.append(
-                            {"id": pt.get("id"), "text": title, "toggle": tog,
-                             "detail": det}
-                        )
-            if not new_points and not decided:
+                            if pt.get("justification"):
+                                ui.label(
+                                    f"Justification : {pt['justification'][:220]}"
+                                ).classes("text-caption")
+                            with ui.row().classes("w-full items-center gap-2"):
+                                if pt.get("localisation"):
+                                    ui.label(f"📍 {pt['localisation']}").classes(
+                                        "text-caption text-grey"
+                                    )
+                                det = ui.input(
+                                    placeholder="detail / justification"
+                                ).props("dense outlined").style("width: 320px")
+                            checklist_rows.append(
+                                {"id": pt.get("id"), "text": title, "toggle": tog,
+                                 "detail": det}
+                            )
+                if current_orchestrator is not None and current_orchestrator.state.added_docs:
+                    ui.label(
+                        f"📚 Documents ajoutés pendant l'analyse : "
+                        f"{len(current_orchestrator.state.added_docs)} — "
+                        "citez le passage utile dans votre feedback."
+                    ).classes("text-caption text-blue-grey")
+            elif not decided:
                 ui.label(
                     "Aucun point liste detecte dans la relecture — utilisez le "
                     "feedback global ci-dessous."
                 ).classes("text-caption text-grey")
+        else:
+            # Consultation : points affiches sans qualification
+            if points:
+                with ui.scroll_area().style(
+                    "height: 30vh; border-left: 3px solid #ddd; padding-left: 8px"
+                ):
+                    for pt in points:
+                        title = pt.get("titre") or pt.get("text", "")
+                        verdict = (pt.get("verdict") or "").upper()
+                        vcolor = {"BLOQUANT": "red", "IMPORTANT": "orange",
+                                  "MINEUR": "grey"}.get(verdict, "grey")
+                        prefix = f"{pt['id']} " if pt.get("id") else ""
+                        with ui.row().classes("w-full items-start no-wrap gap-2"):
+                            if verdict:
+                                ui.badge(verdict, color=vcolor).props("dense")
+                            ui.label(prefix + title).classes("grow text-body2")
+                        if pt.get("extrait"):
+                            ui.code(pt["extrait"].strip()).classes("w-full").style(
+                                "white-space: pre-wrap; font-size: 12px; padding: 2px 8px"
+                            )
 
-    for btn in (btn_continue, btn_quit, btn_feedback):
-        btn.set_visibility(pending_here)
-    dlg_feedback.set_visibility(pending_here)
-    dlg_points_container.set_visibility(pending_here)
-    dlg_status.set_text(
-        f"Version validée : V{version}. Qualifiez les points ci-dessus, ou "
-        "CONTINUER / QUITTER — la popup se ferme automatiquement après envoi."
-        if pending_here
-        else "Consultation. Aucune decision en attente sur cette etape."
-    )
-    if pending_here:
-        pending_checkpoint["version"] = version
-    checkpoint_dialog.open()
+
+def _open_step_tab(step_id: str) -> None:
+    """Consultation d'une etape : selectionne son onglet (lecture seule)."""
+    if step_cards.get(step_id) is None:
+        return
+    if tabs is not None and step_tabs.get(step_id) is not None:
+        tabs.set_value(step_tabs[step_id])
+    _render_step_points(step_id, interactive=False)
+    _set_decision_bar(step_id, False)
+
+
+async def gui_checkpoint(
+    step_id: str, production: str, review: str, all_outputs: dict,
+    decided_points: dict | None = None,
+) -> str:
+    """human_callback : selectionne l'onglet de l'etape, affiche la relecture
+    et attend la decision (qualification inline, plus de popup).
+
+    decided_points : qualifications humaines PAR POINT deja donnees aux
+    iterations precedentes — ces points ne sont PAS re-soumis a l'humain."""
+    loop = asyncio.get_running_loop()
+    fut = loop.create_future()
+    pending_checkpoint["future"] = fut
+    pending_checkpoint["step_id"] = step_id
+    decided_points_by_step[step_id] = decided_points or {}
+    card = step_cards[step_id]
+    card["badge"].set_text("Checkpoint en attente")
+    card["badge"].props("color=deep-orange")
+    log.push(f"[Checkpoint] {step_id} : qualification dans l'onglet de l'etape")
+    _safe_notify(f"Point de controle atteint : {step_id}")
+    if tabs is not None and step_tabs.get(step_id) is not None:
+        tabs.set_value(step_tabs[step_id])
+    _render_step_points(step_id, interactive=True)
+    _set_decision_bar(step_id, True)
+    return await fut
 
 
 def decide(value: str) -> None:
-    """Resout le checkpoint en attente et ferme automatiquement la popup."""
+    """Resout le checkpoint en attente et ferme la qualification."""
     fut = pending_checkpoint.get("future")
     if fut is None or fut.done():
         return
     step_id = pending_checkpoint.pop("step_id", None)
     pending_checkpoint.pop("future", None)
-    pending_checkpoint.pop("version", None)
     checklist_rows.clear()
-    checkpoint_dialog.close()
+    _set_decision_bar(step_id, False)
+    _render_step_points(step_id, interactive=False)
     fut.set_result(value)
     log.push(f">> Checkpoint {step_id} : {value[:80]}")
 
@@ -470,7 +473,10 @@ def send_feedback() -> None:
     - uniquement Sans objet/Deja traite -> 'SANS CORRECTION' : etape validee
       et decisions tracees dans le livrable, sans re-generation
     """
-    version = pending_checkpoint.get("version", 1)
+    step_id = pending_checkpoint.get("step_id", "")
+    version = int(step_cards.get(step_id, {}).get("iteration", 0)) + 1
+    rowset = decision_rows.get(step_id, {})
+    global_fb = (rowset["feedback"].value or "").strip() if rowset.get("feedback") else ""
     qualified = []
     corriger_count = 0
     for row in checklist_rows:
@@ -487,7 +493,19 @@ def send_feedback() -> None:
         qualified.append(line)
         if choice == "corriger":
             corriger_count += 1
-    global_fb = (dlg_feedback.value or "").strip()
+
+    # Documents ajoutes pendant l'analyse : rappeler leur existence dans le
+    # feedback envoye (l'humain cite le passage utile a cote).
+    docs_note = ""
+    if current_orchestrator is not None and current_orchestrator.state.added_docs:
+        docs = ", ".join(
+            str(d.get("directory", ""))[:60]
+            for d in current_orchestrator.state.added_docs[-5:]
+        )
+        docs_note = (
+            f"Documents ajoutes au RAG pendant l'analyse : {docs} "
+            "(a citer par extrait si utilises)."
+        )
 
     if not qualified and not global_fb:
         _safe_notify(
@@ -504,7 +522,8 @@ def send_feedback() -> None:
         )
         if global_fb:
             text += f"\nCommentaire global : {global_fb}"
-        dlg_feedback.set_value("")
+        if docs_note:
+            text += f"\n{docs_note}"
         decide(text)
         return
 
@@ -513,7 +532,8 @@ def send_feedback() -> None:
         lines.extend(qualified)
     if global_fb:
         lines.append(f"Commentaire global : {global_fb}")
-    dlg_feedback.set_value("")
+    if docs_note:
+        lines.append(docs_note)
     decide(f"POINTS DE CONTROLE HUMAIN (version V{version}) :\n" + "\n".join(lines))
 
 
@@ -529,12 +549,21 @@ async def on_progress(event: dict) -> None:
         card["badge"].set_text("En cours…")
         card["badge"].props("color=amber")
         card["iteration"] = 0
+        if card.get("prod_label") is not None:
+            card["prod_label"].set_text("")
+        if tabs is not None and step_tabs.get(event.get("step_id", "")) is not None:
+            tabs.set_value(step_tabs[event["step_id"]])
         log.push(f"=== {event['name']} ===")
     elif etype == "production" and card:
         card["prod_md"].set_content(event["text"])
         card["production_text"] = event["text"]
         card["badge"].set_text("Production recue")
         card["badge"].props("color=teal")
+        if card.get("prod_label") is not None:
+            v = int(card.get("iteration", 0)) + 1
+            card["prod_label"].set_text(
+                f"Production (V{v}) — {len(event['text']):,} caracteres".replace(",", " ")
+            )
         log.push(f"[{event['agent']}] production : {len(event['text'])} caracteres")
     elif etype == "review" and card:
         card["review_text"] = event["text"]
@@ -544,6 +573,8 @@ async def on_progress(event: dict) -> None:
         card["iteration"] = n
         card["badge"].set_text(f"Re-generation #{n}…")
         card["badge"].props("color=orange")
+        if card.get("prod_label") is not None:
+            card["prod_label"].set_text(f"Re-generation #{n} en cours…")
         log.push(f">> Feedback integre : re-generation #{n} de {event['step_id']}")
     elif etype == "context_purged":
         log.push(f"[memoire] contexte purge ({event.get('size_before', '?')} messages)")
@@ -629,6 +660,13 @@ async def do_ingest():
     if not directory.exists():
         ui.notify(f"Repertoire introuvable : {directory}", type="negative")
         return
+    if analysis_running and ingest_reset.value:
+        _safe_notify(
+            "Reset de l'index interdit pendant une analyse (les etapes valides "
+            "s'appuient sur l'index existant). Dejacocher ou attendre la fin.",
+            type_="warning",
+        )
+        return
     ingest_btn.disable()
     ingest_progress.set_visibility(True)
     log.push(f"[RAG] Ingestion de {directory} (reset={ingest_reset.value})…")
@@ -640,6 +678,19 @@ async def do_ingest():
         for line in report.summary().splitlines():
             log.push(f"[RAG] {line}")
         ui.notify(f"Ingestion terminee : {report.chunks} chunks indexes.", type="positive")
+        # Trace des documents ajoutes PENDANT l'analyse (reponses aux questions
+        # de relecture) : la suite de l'analyse les voit via le RAG, et le
+        # livrable (Bloc 5) mentionne leur provenance.
+        if analysis_running and current_orchestrator is not None and not ingest_reset.value:
+            import time as _time
+            current_orchestrator.state.added_docs.append({
+                "ts": _time.strftime("%H:%M:%S"),
+                "directory": str(directory),
+            })
+            log.push(
+                f"[RAG] documents ajoutes pendant l'analyse : {directory} — "
+                "citez le passage utile dans votre feedback."
+            )
     except Exception as exc:
         log.push(f"[RAG][ERREUR] {exc}")
         ui.notify(f"Erreur pendant l'ingestion : {exc}", type="negative")
@@ -709,7 +760,7 @@ async def _launch_analysis(
     resume_data : etat de session charge — les etapes validees sont conservees
     en l'etat et la suite s'execute sur le modele choisi au moment de la
     reprise (changement de modele entre etapes)."""
-    global analysis_running
+    global analysis_running, current_orchestrator
     try:
         if mode == "cloud":
             cloud_client = local_client = client_from_profile(
@@ -759,12 +810,14 @@ async def _launch_analysis(
         model_labels=model_labels,
     )
     orchestrator.state.analysis_state.project_name = project
+    current_orchestrator = orchestrator
 
     if resume_data:
         try:
             orchestrator.state = OrchestratorState.from_dict(resume_data)
         except ValueError as exc:
             ui.notify(f"Session incompatible : {exc}", type="negative")
+            current_orchestrator = None
             return
         # Repeupler les cartes des etapes deja connues de la session
         for step in WORKFLOW_STEPS:
@@ -776,11 +829,16 @@ async def _launch_analysis(
                 card["prod_md"].set_content(out)
                 card["production_text"] = out
                 card["review_text"] = orchestrator.state.reviews.get(step["id"]) or ""
+                if card.get("prod_label") is not None:
+                    card["prod_label"].set_text(
+                        f"Production — {len(out):,} caracteres".replace(",", " ")
+                    )
                 v = orchestrator.state.human_validations.get(step["id"])
                 done = (v and v != "quit") or (step["id"] == "livraison")
                 if out and done:
                     card["badge"].set_text("Validee (session)")
                     card["badge"].props("color=green")
+                _render_step_points(step["id"], interactive=False)
     else:
         # Remise a zero visuelle des cartes
         for card in step_cards.values():
@@ -790,8 +848,17 @@ async def _launch_analysis(
             card["production_text"] = ""
             card["review_text"] = ""
             card["phase_stats"] = {}
-            if card.get("stats_md"):
+            card["totals"] = {}
+            if card.get("stats_md") is not None:
                 card["stats_md"].set_content("")
+            if card.get("prod_label") is not None:
+                card["prod_label"].set_text("")
+            if card.get("points_container") is not None:
+                card["points_container"].clear()
+        checklist_rows.clear()
+        decided_points_by_step.clear()
+        for sid in decision_rows:
+            _set_decision_bar(sid, False)
 
     analysis_running = True
     run_btn.disable()
@@ -819,7 +886,7 @@ async def _launch_analysis(
             log.push("  - reduire max_tokens")
             log.push("  - desactiver le Thinking du modele dans LM Studio (gain majeur)")
             log.push("  - activer Flash Attention + KV cache q8_0 au chargement")
-            log.push("  - ou reprendre la session plus tard (panneau Sessions)")
+            log.push("  - ou reprendre la session plus tard (tiroir Sessions)")
             ui.notify(
                 f"Generation trop longue : timeout de {timeout_s} s depasse. "
                 "Pistes dans le journal : augmenter le timeout, reduire max_tokens, "
@@ -905,7 +972,7 @@ def _refresh_sessions(*_a) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Construction de la page
+# Construction de la page (layout par onglets, maquette A)
 # ---------------------------------------------------------------------------
 
 def build_page() -> None:
@@ -914,250 +981,285 @@ def build_page() -> None:
     global function_calling_switch, timeout_input, retries_input, reasoning_select
     global web_search_switch, web_backend, searxng_url_input, tavily_key_input
     global step_context_limit_input, context_auto_switch
-    global checkpoint_dialog, dlg_title, dlg_prod_md, dlg_review_md, dlg_status, dlg_stats
-    global dlg_feedback, btn_continue, btn_quit, btn_feedback
-    global dlg_card, dlg_prod_scroll, dlg_review_scroll, btn_maximize, dlg_points_container
     global ingest_dir, ingest_reset, ingest_btn, ingest_progress
     global project_input, context_input, run_btn, run_progress
+    global tabs, sessions_container, fs_dialog, fs_md, fs_title, docs_added_md
 
     with ui.row().classes("w-full items-center justify-between"):
         with ui.column().classes("gap-0"):
             ui.label("Risk Analysis Copilot — APR").classes("text-h5")
-            ui.label("Analyse Preliminaire de Risque multi-agents (LM Studio / cloud)").classes(
-                "text-subtitle2 text-grey"
-            )
-        ui.badge("APR Copilot", color="blue-grey")
+            ui.label(
+                "Analyse Preliminaire de Risque multi-agents · 1 onglet par etape · "
+                "qualification inline"
+            ).classes("text-subtitle2 text-grey")
+        ui.badge("APR Copilot v1.3.18", color="blue-grey")
 
-    with ui.row().classes("w-full items-start"):
-        # ------------------------- Colonne reglages -------------------------
-        with ui.column().classes("col-grow"):
+    # ------------------------- Onglets par etape -------------------------
+    step_cards.clear()
+    decided_points_by_step.clear()
+    decision_rows.clear()
+    checklist_rows.clear()
 
-            with ui.card().classes("w-full"):
-                ui.label("Affectation des modeles").classes("text-subtitle1")
-                mode_radio = ui.radio(
-                    {
-                        "hybrid": "Hybride (cloud + local)",
-                        "cloud": "Tout sur le cloud",
-                        "local": "Tout en local",
-                    },
-                    value=app_config.profiles.agent_profile,
-                ).props("dense")
+    tabs = ui.tabs().classes("w-full")
+    with tabs:
+        for step in WORKFLOW_STEPS:
+            # etiquette courte : apres "Etape N - "
+            short = step["name"].split(" - ", 1)[-1]
+            step_tabs[step["id"]] = ui.tab(name=step["id"], label=short)
 
-            with ui.card().classes("w-full"):
-                ui.label("Modele local (LM Studio)").classes("text-subtitle1")
-                local_base_url = ui.input(
-                    "Base URL", value=app_config.profiles.local.base_url
-                ).classes("w-full")
-                with ui.row().classes("w-full items-center"):
-                    local_model = ui.select(
-                        [], with_input=True, label="Modele charge"
-                    ).classes("grow")
-                    ui.button(icon="refresh", on_click=list_models).props("flat dense")
-                local_api_key = ui.input(
-                    "Cle API", value=app_config.profiles.local.api_key or "not-needed"
-                ).classes("w-full")
-                with ui.row().classes("w-full items-center"):
-                    local_temp = ui.number(
-                        "Temperature", value=app_config.profiles.local.temperature,
-                        min=0, max=2, step=0.05,
-                    ).props("label-always")
-                    local_max_tokens = ui.number(
-                        "Max tokens", value=app_config.profiles.local.max_tokens,
-                        format="%.0f", min=256,
-                    ).props("label-always")
-
-            with ui.card().classes("w-full"):
-                ui.label("Modele cloud").classes("text-subtitle1")
-                cloud_model = ui.input(
-                    "Modele", value=app_config.profiles.cloud.model
-                ).classes("w-full")
-                cloud_base_url = ui.input(
-                    "Base URL", value=app_config.profiles.cloud.base_url
-                ).classes("w-full")
-                cloud_api_key = ui.input(
-                    "Cle API", value=app_config.profiles.cloud.api_key,
-                    password=True,
-                ).classes("w-full")
-                with ui.row().classes("w-full items-center"):
-                    cloud_temp = ui.number(
-                        "Temperature", value=app_config.profiles.cloud.temperature,
-                        min=0, max=2, step=0.05,
-                    ).props("label-always")
-                    cloud_max_tokens = ui.number(
-                        "Max tokens", value=app_config.profiles.cloud.max_tokens,
-                        format="%.0f", min=256,
-                    ).props("label-always")
-
-            with ui.expansion("Parametres avances", icon="tune").classes("w-full"):
-                function_calling_switch = ui.switch("Tool calling", value=True)
-                reasoning_select = ui.select(
-                    {
-                        "off": "Off (rapide)",
-                        "low": "Low",
-                        "medium": "Medium",
-                        "high": "High",
-                        "xhigh": "XHigh",
-                    },
-                    value=os.getenv("LLM_REASONING", "off"),
-                    label="Niveau de raisonnement",
-                ).classes("w-full")
-                web_search_switch = ui.switch(
-                    "Recherche web (etat de l'art)", value=False
-                )
-                web_backend = ui.select(
-                    {
-                        "ddg": "DuckDuckGo (sans cle)",
-                        "searxng": "SearXNG (auto-heberge)",
-                        "tavily": "Tavily (cle cloud)",
-                    },
-                    value=os.getenv("WEB_SEARCH_BACKEND", "ddg"),
-                    label="Backend de recherche",
-                ).classes("w-full")
-                searxng_url_input = ui.input(
-                    "URL SearXNG", value=os.getenv("SEARXNG_URL", "")
-                ).classes("w-full")
-                tavily_key_input = ui.input(
-                    "Cle Tavily", value=os.getenv("TAVILY_API_KEY", ""), password=True
-                ).classes("w-full")
-                with ui.row().classes("w-full items-center"):
-                    timeout_input = ui.number(
-                        "Timeout appel LLM (s)",
-                        value=float(os.getenv("LLM_TIMEOUT", "1800")),
-                        format="%.0f", min=30,
-                    ).props("label-always")
-                    retries_input = ui.number(
-                        "Retries", value=float(os.getenv("LLM_MAX_RETRIES", "1")),
-                        format="%.0f", min=0,
-                    ).props("label-always")
-                step_context_limit_input = ui.number(
-                    "Limite de contexte par etape precedente (caracteres)",
-                    value=float(os.getenv("STEP_CONTEXT_LIMIT", "40000")),
-                    format="%.0f", min=1000,
-                ).props("label-always").classes("w-full")
-                context_auto_switch = ui.switch(
-                    "Contexte automatique (detecte via LM Studio)", value=True
-                )
-
-            with ui.card().classes("w-full"):
-                ui.label("Base documentaire (RAG)").classes("text-subtitle1")
-                ingest_dir = ui.input(
-                    "Dossier de documents", value=str(app_config.input_dir)
-                ).classes("w-full")
-                ingest_reset = ui.switch(
-                    "Reinitialiser l'index avant ingestion", value=False
-                )
-                with ui.row().classes("w-full items-center"):
-                    ingest_btn = ui.button(
-                        "Ingestion", icon="upload_file", on_click=do_ingest
-                    )
-                    ingest_progress = ui.linear_progress(show_value=False).props(
-                        "indeterminate instant-feedback"
-                    ).classes("grow")
-                    ingest_progress.set_visibility(False)
-                ui.button(
-                    "Statut de l'index", icon="storage", on_click=show_stats
-                ).props("flat dense")
-
-            with ui.card().classes("w-full"):
-                ui.label("Analyse").classes("text-subtitle1")
-                project_input = ui.input("Nom du projet", value="Test_Projet").classes("w-full")
-                context_input = ui.textarea(
-                    "Contexte / description du systeme", value=""
-                ).classes("w-full")
-                ui.upload(
-                    on_upload=on_context_upload, auto_upload=True
-                ).props('accept=.txt,.md label="Charger un fichier de contexte"').classes("w-full")
-                run_btn = ui.button(
-                    "Lancer l'analyse", icon="play_arrow", on_click=start_analysis
-                ).classes("w-full")
-                run_progress = ui.linear_progress(show_value=False).props(
-                    "indeterminate instant-feedback"
-                )
-                run_progress.set_visibility(False)
-
-        # ------------------------- Colonne workflow -------------------------
-        with ui.column().classes("col-grow"):
-            ui.label("Workflow").classes("text-h6")
-            step_cards.clear()
-            decided_points_by_step.clear()
-            for step in WORKFLOW_STEPS:
-                with ui.card().classes("w-full"):
+    with ui.tab_panels(tabs, value=step_tabs[WORKFLOW_STEPS[0]["id"]]).classes("w-full"):
+        for step in WORKFLOW_STEPS:
+            with ui.tab_panel(step_tabs[step["id"]]).classes("w-full"):
+                with ui.row().classes("w-full items-center justify-between no-wrap"):
+                    ui.label(step["name"]).classes("text-h6")
+                    badge = ui.badge("En attente", color="grey")
+                stats_md = ui.markdown("").classes("text-caption")
+                with ui.expansion("Production", icon="description").classes("w-full"):
                     with ui.row().classes("w-full items-center justify-between"):
-                        ui.label(step["name"]).classes("text-subtitle1")
-                        badge = ui.badge("En attente", color="grey")
+                        prod_label = ui.label("").classes("text-caption text-grey")
+                        ui.button(
+                            icon="fullscreen",
+                            on_click=lambda s=step["id"]: _show_fullscreen(s),
+                        ).props("flat dense")
                     with ui.scroll_area().classes("w-full").style(
-                        "height: 220px; border-left: 3px solid #ddd; padding-left: 8px"
+                        "max-height: 45vh; border-left: 3px solid #1976d2; padding-left: 8px"
                     ):
                         prod_md = ui.markdown("*Production non generee*")
+                ui.label("Relecture").classes("text-subtitle2 text-grey")
+                points_container = ui.column().classes("w-full")
+                status = ui.label(
+                    "CONTINUER valide la version affichee ; qualifiez les points ou "
+                    "saisissez un feedback pour une re-génération."
+                ).classes("text-caption text-grey")
+                feedback_input = ui.textarea(
+                    "Feedback global (libre, optionnel — structuré si besoin)"
+                ).classes("w-full")
+                with ui.row():
+                    b_c = ui.button(
+                        "CONTINUER", on_click=lambda: decide("CONTINUER")
+                    ).props("color=positive")
+                    b_q = ui.button(
+                        "QUITTER", on_click=lambda: decide("QUITTER")
+                    ).props("color=negative outline")
+                    b_f = ui.button(
+                        "Envoyer le feedback", on_click=send_feedback
+                    ).props("color=warning")
+                with ui.row().classes("items-center"):
                     ui.button(
-                        "Relecture / Validation",
+                        "Voir la relecture (consultation)",
                         icon="rate_review",
-                        on_click=lambda s=step["id"]: _open_checkpoint_dialog(s),
+                        on_click=lambda s=step["id"]: _open_step_tab(s),
                     ).props("flat dense")
-                    stats_md = ui.markdown("").classes("text-caption")
-                    step_cards[step["id"]] = {
-                        "name": step["name"],
-                        "badge": badge,
-                        "prod_md": prod_md,
-                        "production_text": "",
-                        "review_text": "",
-                        "stats_md": stats_md,
-                        "phase_stats": {},
-                        "totals": {},
-                    }
+                decision_rows[step["id"]] = {
+                    "feedback": feedback_input, "btn_continue": b_c,
+                    "btn_quit": b_q, "btn_feedback": b_f, "status": status,
+                }
+                step_cards[step["id"]] = {
+                    "name": step["name"],
+                    "badge": badge,
+                    "prod_md": prod_md,
+                    "prod_label": prod_label,
+                    "production_text": "",
+                    "review_text": "",
+                    "stats_md": stats_md,
+                    "phase_stats": {},
+                    "totals": {},
+                    "points_container": points_container,
+                }
+                for el in (feedback_input, b_c, b_q, b_f, status):
+                    el.set_visibility(False)
 
-            log = ui.log(max_lines=500).classes("w-full").style("height: 200px")
-            log.push("Astuce : cliquez sur le bouton refresh du modele local pour lister")
-            log.push("les modeles charges sur le serveur LM Studio.")
+    # ------------------------- Journal (tiroir) -------------------------
+    with ui.expansion("Journal", icon="receipt_long").classes("w-full"):
+        log = ui.log(max_lines=500).classes("w-full").style("height: 220px")
+        log.push("Astuce : reglages et lancement dans le tiroir « Réglages » ;")
+        log.push("documents ajoutables pendant l'analyse via « Documents RAG ».")
 
-            # ------------------------- Panneau Sessions -------------------------
-            with ui.row().classes("w-full items-center"):
-                ui.label("Sessions sauvegardees").classes("text-subtitle1")
-                ui.button(
-                    "Rafraichir", icon="refresh", on_click=_refresh_sessions
-                ).props("flat dense")
-            sessions_container = ui.column().classes("w-full")
-            _refresh_sessions()
+    # ------------------------- Documents RAG (tiroir) -------------------------
+    with ui.expansion(
+        "Documents RAG (ajout possible pendant l'analyse)", icon="folder"
+    ).classes("w-full"):
+        ingest_dir = ui.input(
+            "Dossier de documents", value=str(app_config.input_dir)
+        ).classes("w-full")
+        ingest_reset = ui.switch(
+            "Reinitialiser l'index avant ingestion", value=False
+        )
+        with ui.row().classes("w-full items-center"):
+            ingest_btn = ui.button(
+                "Ingestion", icon="upload_file", on_click=do_ingest
+            )
+            ingest_progress = ui.linear_progress(show_value=False).props(
+                "indeterminate instant-feedback"
+            ).classes("grow")
+            ingest_progress.set_visibility(False)
+        with ui.row().classes("w-full items-center"):
+            ui.button(
+                "Statut de l'index", icon="storage", on_click=show_stats
+            ).props("flat dense")
+        docs_added_md = ui.markdown("").classes("text-caption")
+        ui.label(
+            "Pendant un checkpoint : ajoutez le document, puis citez le passage "
+            "utile dans votre feedback — l'etape suivante (et les re-generations) "
+            "le verront via le RAG."
+        ).classes("text-caption text-grey")
 
-    # Popup de relecture / decision des checkpoints
-    with ui.dialog() as checkpoint_dialog:
-        with ui.card() as dlg_card:
-            with ui.row().classes("w-full items-center justify-between"):
-                dlg_title = ui.label("Point de controle").classes("text-h6")
-                btn_maximize = ui.button(
-                    icon="fullscreen", on_click=toggle_maximize
-                ).props("flat dense")
-            with ui.row().classes("w-full items-stretch"):
-                with ui.column().classes("col grow"):
-                    ui.label("Production").classes("text-subtitle2 text-grey")
-                    with ui.scroll_area() as dlg_prod_scroll:
-                        dlg_prod_md = ui.markdown("")
-                with ui.column().classes("col grow"):
-                    ui.label("Relecture").classes("text-subtitle2 text-grey")
-                    with ui.scroll_area() as dlg_review_scroll:
-                        dlg_review_md = ui.markdown("")
-            dlg_points_container = ui.column().classes("w-full")
-            dlg_stats = ui.label("").classes("text-caption text-grey")
-            dlg_status = ui.label("").classes("text-caption text-grey")
-            dlg_feedback = ui.textarea(
-                "Feedback global (libre, optionnel — structuré si besoin)"
+    # ------------------------- Sessions (tiroir) -------------------------
+    with ui.expansion("Sessions sauvegardees", icon="history").classes("w-full"):
+        with ui.row().classes("w-full items-center"):
+            ui.button("Rafraichir", icon="refresh", on_click=_refresh_sessions).props(
+                "flat dense"
+            )
+        sessions_container = ui.column().classes("w-full")
+        _refresh_sessions()
+
+    # ------------------------- Reglages (tiroir) -------------------------
+    with ui.expansion("Réglages & lancement", icon="settings").classes("w-full"):
+        with ui.card().classes("w-full"):
+            ui.label("Affectation des modeles").classes("text-subtitle1")
+            mode_radio = ui.radio(
+                {
+                    "hybrid": "Hybride (cloud + local)",
+                    "cloud": "Tout sur le cloud",
+                    "local": "Tout en local",
+                },
+                value=app_config.profiles.agent_profile,
+            ).props("dense")
+
+        with ui.card().classes("w-full"):
+            ui.label("Modele local (LM Studio)").classes("text-subtitle1")
+            local_base_url = ui.input(
+                "Base URL", value=app_config.profiles.local.base_url
             ).classes("w-full")
-            with ui.row():
-                btn_continue = ui.button(
-                    "CONTINUER", on_click=lambda: decide("CONTINUER")
-                ).props("color=positive")
-                btn_quit = ui.button(
-                    "QUITTER", on_click=lambda: decide("QUITTER")
-                ).props("color=negative outline")
-                btn_feedback = ui.button(
-                    "Envoyer le feedback", on_click=send_feedback
-                ).props("color=warning")
-    _apply_dialog_size()
+            with ui.row().classes("w-full items-center"):
+                local_model = ui.select(
+                    [], with_input=True, label="Modele charge"
+                ).classes("grow")
+                ui.button(icon="refresh", on_click=list_models).props("flat dense")
+            local_api_key = ui.input(
+                "Cle API", value=app_config.profiles.local.api_key or "not-needed"
+            ).classes("w-full")
+            with ui.row().classes("w-full items-center"):
+                local_temp = ui.number(
+                    "Temperature", value=app_config.profiles.local.temperature,
+                    min=0, max=2, step=0.05,
+                ).props("label-always")
+                local_max_tokens = ui.number(
+                    "Max tokens", value=app_config.profiles.local.max_tokens,
+                    format="%.0f", min=256,
+                ).props("label-always")
+
+        with ui.card().classes("w-full"):
+            ui.label("Modele cloud").classes("text-subtitle1")
+            cloud_model = ui.input(
+                "Modele", value=app_config.profiles.cloud.model
+            ).classes("w-full")
+            cloud_base_url = ui.input(
+                "Base URL", value=app_config.profiles.cloud.base_url
+            ).classes("w-full")
+            cloud_api_key = ui.input(
+                "Cle API", value=app_config.profiles.cloud.api_key,
+                password=True,
+            ).classes("w-full")
+            with ui.row().classes("w-full items-center"):
+                cloud_temp = ui.number(
+                    "Temperature", value=app_config.profiles.cloud.temperature,
+                    min=0, max=2, step=0.05,
+                ).props("label-always")
+                cloud_max_tokens = ui.number(
+                    "Max tokens", value=app_config.profiles.cloud.max_tokens,
+                    format="%.0f", min=256,
+                ).props("label-always")
+
+        with ui.expansion("Parametres avances", icon="tune").classes("w-full"):
+            function_calling_switch = ui.switch("Tool calling", value=True)
+            reasoning_select = ui.select(
+                {
+                    "off": "Off (rapide)",
+                    "low": "Low",
+                    "medium": "Medium",
+                    "high": "High",
+                    "xhigh": "XHigh",
+                },
+                value=os.getenv("LLM_REASONING", "off"),
+                label="Niveau de raisonnement",
+            ).classes("w-full")
+            web_search_switch = ui.switch(
+                "Recherche web (etat de l'art)", value=False
+            )
+            web_backend = ui.select(
+                {
+                    "ddg": "DuckDuckGo (sans cle)",
+                    "searxng": "SearXNG (auto-heberge)",
+                    "tavily": "Tavily (cle cloud)",
+                },
+                value=os.getenv("WEB_SEARCH_BACKEND", "ddg"),
+                label="Backend de recherche",
+            ).classes("w-full")
+            searxng_url_input = ui.input(
+                "URL SearXNG", value=os.getenv("SEARXNG_URL", "")
+            ).classes("w-full")
+            tavily_key_input = ui.input(
+                "Cle Tavily", value=os.getenv("TAVILY_API_KEY", ""), password=True
+            ).classes("w-full")
+            with ui.row().classes("w-full items-center"):
+                timeout_input = ui.number(
+                    "Timeout appel LLM (s)",
+                    value=float(os.getenv("LLM_TIMEOUT", "1800")),
+                    format="%.0f", min=30,
+                ).props("label-always")
+                retries_input = ui.number(
+                    "Retries", value=float(os.getenv("LLM_MAX_RETRIES", "1")),
+                    format="%.0f", min=0,
+                ).props("label-always")
+            step_context_limit_input = ui.number(
+                "Limite de contexte par etape precedente (caracteres)",
+                value=float(os.getenv("STEP_CONTEXT_LIMIT", "40000")),
+                format="%.0f", min=1000,
+            ).props("label-always").classes("w-full")
+            context_auto_switch = ui.switch(
+                "Contexte automatique (detecte via LM Studio)", value=True
+            )
+
+        with ui.card().classes("w-full"):
+            ui.label("Lancement").classes("text-subtitle1")
+            project_input = ui.input("Nom du projet", value="Test_Projet").classes("w-full")
+            context_input = ui.textarea(
+                "Contexte / description du systeme", value=""
+            ).classes("w-full")
+            ui.upload(
+                on_upload=on_context_upload, auto_upload=True
+            ).props('accept=.txt,.md label="Charger un fichier de contexte"').classes("w-full")
+            run_btn = ui.button(
+                "Lancer l'analyse", icon="play_arrow", on_click=start_analysis
+            ).classes("w-full")
+            run_progress = ui.linear_progress(show_value=False).props(
+                "indeterminate instant-feedback"
+            )
+            run_progress.set_visibility(False)
+
+    # Popup plein ecran de production (lecture)
+    with ui.dialog() as fs_dialog:
+        with ui.card().style("width: 97vw; max-width: 97vw; height: 92vh"):
+            with ui.row().classes("w-full items-center justify-between"):
+                fs_title = ui.label("Production").classes("text-h6")
+                ui.button(icon="close", on_click=fs_dialog.close).props("flat dense")
+            with ui.scroll_area().style("height: 80vh"):
+                fs_md = ui.markdown("")
 
     ui.label(
         "Outil local mono-utilisateur. Les livrables sont ecrits dans "
-        f"{app_config.output_dir}"
+        f"{app_config.output_dir}. Interface precedente : python gui_classic.py"
     ).classes("text-caption text-grey")
+
+
+def _show_fullscreen(step_id: str) -> None:
+    card = step_cards.get(step_id)
+    if card is None:
+        return
+    fs_title.set_text(f"{card['name']} — Production")
+    fs_md.set_content(card.get("production_text") or "*Production non generee*")
+    fs_dialog.open()
 
 
 build_page()
@@ -1171,11 +1273,71 @@ def parse_args():
     return parser.parse_args()
 
 
+def _detect_lan_ip() -> str:
+    """IP LAN de la machine (sans paquet envoye) — localhost:8080 peut etre
+    occupe par le serveur llama.cpp, l'interface APR doit s'ouvrir sur l'IP LAN."""
+    host = os.getenv("GUI_OPEN_HOST", "").strip()
+    if host:
+        return host
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))  # aucune donnee : sert seulement a choisir la route
+            ip = s.getsockname()[0]
+        finally:
+            s.close()
+        if ip and not ip.startswith("127."):
+            return ip
+    except Exception:
+        pass
+    try:
+        ip = socket.gethostbyname(socket.gethostname())
+        if ip and not ip.startswith("127."):
+            return ip
+    except Exception:
+        pass
+    return "localhost"
+
+
+def _compute_open_url(port: int) -> str:
+    return f"http://{_detect_lan_ip()}:{port}"
+
+
+def _open_browser_when_ready(url: str, timeout: float = 30.0) -> None:
+    """Ouvre le navigateur des que le serveur repond (thread d'attente).
+
+    Remplace l'ouverture auto de NiceGUI qui pointe localhost — or
+    localhost:8080 peut etre tenu par le serveur llama.cpp ('chat')."""
+    import threading
+    import time as _t
+
+    def _wait_open() -> None:
+        import webbrowser
+        deadline = _t.time() + timeout
+        while _t.time() < deadline:
+            try:
+                urllib.request.urlopen(url, timeout=1)
+                break
+            except Exception:
+                _t.sleep(0.3)
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+
+    threading.Thread(target=_wait_open, daemon=True).start()
+
+
 if __name__ in {"__main__", "__mp_main__"}:
     args = parse_args()
+    if not args.no_show:
+        open_url = _compute_open_url(args.port)
+        print(f"Interface APR : {open_url}")
+        print(f"(localhost:{args.port} peut pointer vers le serveur llama.cpp — ignore)")
+        _open_browser_when_ready(open_url)
     ui.run(
         title="Risk Analysis Copilot — APR",
         port=args.port,
-        show=not args.no_show,
+        show=False,
         reload=args.reload,
     )
