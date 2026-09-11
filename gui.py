@@ -23,7 +23,7 @@ import socket
 import urllib.request
 from pathlib import Path
 
-from nicegui import ui
+from nicegui import ui, app
 
 from agents.agents import EngineerAgent, QualityAgent, ClientAgent, SecretaryAgent
 from agents.orchestrator import (
@@ -1303,38 +1303,45 @@ def _compute_open_url(port: int) -> str:
     return f"http://{_detect_lan_ip()}:{port}"
 
 
-def _open_browser_when_ready(url: str, timeout: float = 30.0) -> None:
-    """Ouvre le navigateur des que le serveur repond (thread d'attente).
+def _open_browser_hook_factory(url: str):
+    """Callback startup NiceGUI : ouvre le navigateur UNE fois, au demarrage
+    effectif du serveur (remplace le thread sondant qui pouvait s'empiler).
 
-    Remplace l'ouverture auto de NiceGUI qui pointe localhost — or
-    localhost:8080 peut etre tenu par le serveur llama.cpp ('chat')."""
+    Garde-fous contre les ouvertures multiples (reload/restart du process) :
+    verrou + drapeau local + sentinelle d'environnement heritee par les
+    sous-processus (APR_BROWSER_OPENED)."""
     import threading
-    import time as _t
 
-    def _wait_open() -> None:
-        import webbrowser
-        deadline = _t.time() + timeout
-        while _t.time() < deadline:
-            try:
-                urllib.request.urlopen(url, timeout=1)
-                break
-            except Exception:
-                _t.sleep(0.3)
+    lock = threading.Lock()
+    state = {"done": False}
+
+    def _hook() -> None:
+        if os.getenv("APR_BROWSER_OPENED"):
+            return
+        with lock:
+            if state["done"]:
+                return
+            state["done"] = True
+        os.environ["APR_BROWSER_OPENED"] = "1"
         try:
+            import webbrowser
             webbrowser.open(url)
-        except Exception:
-            pass
+            print(f"Navigateur ouvert sur {url}")
+        except Exception as exc:
+            print(f"Ouverture du navigateur impossible ({exc}) — ouvrez {url}")
 
-    threading.Thread(target=_wait_open, daemon=True).start()
+    return _hook
 
 
 if __name__ in {"__main__", "__mp_main__"}:
     args = parse_args()
+    open_url = _compute_open_url(args.port)
+    print(f"Interface APR : {open_url}")
+    print(f"(localhost:{args.port} peut pointer vers le serveur llama.cpp — ignore)")
     if not args.no_show:
-        open_url = _compute_open_url(args.port)
-        print(f"Interface APR : {open_url}")
-        print(f"(localhost:{args.port} peut pointer vers le serveur llama.cpp — ignore)")
-        _open_browser_when_ready(open_url)
+        # Ouverture UNIQUE au demarrage effectif du serveur (hook NiceGUI),
+        # a la place du thread sondant qui pouvait empiler des fenetres.
+        app.on_startup(_open_browser_hook_factory(open_url))
     ui.run(
         title="Risk Analysis Copilot — APR",
         port=args.port,
