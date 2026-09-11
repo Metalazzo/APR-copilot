@@ -1,5 +1,62 @@
 # Changelog
 
+## [1.3.17] - 2026-09-11
+
+### Ajoute — sessions sauvegardables, reprise et statistiques
+
+**Sessions** : chaque analyse cree `output/sessions/<horodatage>/state.json`,
+ecrit apres chaque production, relecture et decision de checkpoint. Quitter =
+mise en pause reprenable ; un crash ne perd que l'etape en cours.
+
+- **Reprise** : panneau « Sessions » dans la GUI (Reprendre / Supprimer) ou
+  `python main.py analyze -p <projet> --resume <dossier>` — les etapes validees
+  sont conservees en l'etat, la reanalyse demarre a la premiere etape non
+  validee (l'etat d'une etape interrompue en cours de generation est perdu :
+  elle repart de zero, les etapes etant auto-contenues).
+- **Changement de modele entre etapes** : a la reprise, les clients sont
+  reconstruits avec les reglages actuels — la suite de l'analyse s'execute sur
+  le modele choisi au relancement, les etapes validees gardent leur modele
+  producteur (traçabilite `models_used` par etape).
+- **Traçabilite v1.3.16 preservee** : qualifications humaines par point
+  (point_decisions) restaurees a la reprise — la table du Bloc 5 du livrable
+  reste complete.
+
+**Statistiques de generation** (collecte au tunnel unique `_ask_agent`, usage
+OpenAI standard — LM Studio comme API cloud) :
+- par appel : tokens prompt/completion, duree reelle, vitesse tok/s, modele
+  producteur (etiquette `cloud:<model>` / `local:<model>`), etape/bloc/agent/
+  iteration
+- par phase : temps de generation de l'etape (production + relectures + toutes
+  iterations), appels, tokens, modeles
+- temps total de generation cumule ; duree ecoulee hors pauses (les attentes
+  aux checkpoints sont soustraites) ; horodatages debut/fin de session
+- ETA des etapes restantes (moyenne glissante) affichee des l'etape 2
+- cout estime en EUR (optionnel, `CLOUD_PRICE_INPUT`/`CLOUD_PRICE_OUTPUT`,
+  applique aux appels du profil cloud uniquement)
+- affichage : evenement `step_stats` → carte d'etape + journal ; encart
+  « Performance de l'etape » dans la popup de checkpoint ; recapitulatif CLI ;
+  export `stats.md` + `stats.json` dans la session
+- cumul a la reprise : les stats des etapes conservees persistent →
+  comparaison inter-modeles au sein d'une meme analyse (ex. Qwen 20 tok/s vs
+  Mistral 80 tok/s, phase par phase)
+
+## [1.3.16.1] - 2026-09-10
+
+### Corrige — points de relecture manquants (18 listes, 15 qualifiables)
+
+- **Parseur combiné** : les blocs canoniques `### [P#]` ET les puces/numerations
+  hors-blocs sont desormais collectes ensemble, en ordre du document — v1.3.16
+  ignorait les puces des que des blocs canoniques existaient (relecteur melant
+  les formats : 3 points sur 18 absents de la qualification).
+- **Plafond 12 -> 100 points** : l'ancien plafond tronquait silencieusement
+  les relectures a plus de 12 points.
+- **Tolerances de format** : `###`/`####`, `[P#]`/`P#`/« P 1 », champs en gras
+  (`**Extrait** :`), extrait renvoye a la ligne suivante, « Correction
+  proposee : » reconnue comme champ de bloc.
+- **Visibilite** : journal « N point(s) detecte(s) (X canonique(s), Y en
+  repli) » + compteur dans la popup — plus de perte silencieuse.
+- Hauteur de la zone de qualification augmentee (28vh -> 34vh).
+
 ## [1.3.16] - 2026-09-09
 
 ### Ameliore — relecture ancree et lisible (points de controle humains)

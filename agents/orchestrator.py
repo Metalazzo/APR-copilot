@@ -2,8 +2,10 @@ import asyncio
 import json
 import os
 import re
+import time
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
+from pathlib import Path
 from typing import Optional, Callable, Awaitable
 
 from autogen_agentchat.agents import AssistantAgent
@@ -12,6 +14,7 @@ from autogen_ext.models.openai import OpenAIChatCompletionClient
 
 from config import ModelProfile, config as app_config
 from rag.retriever import retrieve, format_retrieved_context
+from session_store import save_session, new_session_dir
 from state import AnalysisState
 
 # ---------------------------------------------------------------------------
@@ -407,7 +410,54 @@ class OrchestratorState:
     # detail, iteration}}}. Les points deja decides ne sont pas re-soumis a
     # l'humain et sont traces dans le livrable (Bloc 5).
     point_decisions: dict = field(default_factory=dict)
+    # Statistiques de generation par appel (v1.3.17) : {ts, step, agent, bloc,
+    # iteration, model, prompt_tokens, completion_tokens, elapsed_s, tok_s}
+    call_stats: list = field(default_factory=list)
+    # Modele producteur par etape (traçabilite de provenance)
+    models_used: dict = field(default_factory=dict)
+    # Horodatages de session (debut / fin d'analyse)
+    t_start: str = ""
+    t_end: str = ""
     analysis_state: AnalysisState = field(default_factory=AnalysisState)
+
+    def to_dict(self) -> dict:
+        """Serialisation pour la session (output/sessions/<id>/state.json)."""
+        return {
+            "version": 1,
+            "step_index": self.step_index,
+            "outputs": dict(self.outputs),
+            "reviews": dict(self.reviews),
+            "human_validations": dict(self.human_validations),
+            "point_decisions": self.point_decisions,
+            "call_stats": list(self.call_stats),
+            "models_used": dict(self.models_used),
+            "t_start": self.t_start,
+            "t_end": self.t_end,
+            "analysis_state": asdict(self.analysis_state),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "OrchestratorState":
+        v = int((data or {}).get("version", 0) or 0)
+        if v < 1:
+            raise ValueError(
+                f"Session incompatible (version {v!r}) : reprise impossible."
+            )
+        st = cls()
+        st.step_index = int(data.get("step_index", -1) or -1)
+        st.outputs = dict(data.get("outputs", {}) or {})
+        st.reviews = dict(data.get("reviews", {}) or {})
+        st.human_validations = dict(data.get("human_validations", {}) or {})
+        st.point_decisions = dict(data.get("point_decisions", {}) or {})
+        st.call_stats = list(data.get("call_stats", []) or [])
+        st.models_used = dict(data.get("models_used", {}) or {})
+        st.t_start = data.get("t_start", "") or ""
+        st.t_end = data.get("t_end", "") or ""
+        try:
+            st.analysis_state = AnalysisState(**(data.get("analysis_state") or {}))
+        except TypeError:
+            st.analysis_state = AnalysisState()
+        return st
 
 
 class RiskAnalysisOrchestrator:
@@ -420,6 +470,8 @@ class RiskAnalysisOrchestrator:
         secretary: AssistantAgent,
         human_callback: Optional[Callable[..., Awaitable[str]]] = None,
         progress_callback: Optional[Callable[[dict], Awaitable[None]]] = None,
+        session_dir: Optional[str] = None,
+        model_labels: Optional[dict] = None,
     ):
         self.engineer = engineer
         self.quality = quality
@@ -430,6 +482,20 @@ class RiskAnalysisOrchestrator:
         # structures (step_start, production, review, checkpoint...).
         self.progress_callback = progress_callback
         self.state = OrchestratorState()
+        # Session de sauvegarde continue (v1.3.17) : dossier horodate cree au
+        # lancement, ou dossier de session existant lors d'une reprise.
+        self.session_dir: Optional[str] = session_dir
+        # Etiquettes de modele par agent, ex. {"engineer": "cloud:mistral-large",
+        # "secretary": "local:Qwen3.8-27B"} — traçabilite + stats/coûts.
+        self.model_labels: dict = model_labels or {}
+        self._name_labels: dict = {}
+        for role, ag in (("engineer", engineer), ("quality", quality),
+                         ("client", client), ("secretary", secretary)):
+            lbl = self.model_labels.get(role)
+            if lbl:
+                self._name_labels[getattr(ag, "name", role)] = lbl
+        self._paused_s: float = 0.0      # temps passe en attente aux checkpoints
+        self._t_run_start: float = 0.0   # horodatage monotone du lancement
 
     async def _emit(self, event: dict) -> None:
         """Notifie la GUI si presente ; une erreur d'affichage ne casse jamais l'analyse."""
@@ -440,16 +506,45 @@ class RiskAnalysisOrchestrator:
         except Exception:
             pass
 
-    async def _ask_agent(self, agent: AssistantAgent, task: str) -> str:
+    async def _ask_agent(
+        self,
+        agent: AssistantAgent,
+        task: str,
+        *,
+        stat_step: str = "",
+        stat_agent: str = "",
+        stat_bloc: str = "",
+        stat_iteration: int = 0,
+    ) -> str:
         team = RoundRobinGroupChat(
             participants=[agent],
             max_turns=1,
         )
+        t0 = time.monotonic()
         result = await team.run(task=task)
+        elapsed = time.monotonic() - t0
         messages = result.messages
-        if messages:
-            return str(messages[-1].content)
-        return ""
+        content = str(messages[-1].content) if messages else ""
+        # Usage OpenAI standard (retourne par LM Studio comme par les API cloud)
+        p_tok = c_tok = 0
+        for m in messages:
+            u = getattr(m, "models_usage", None)
+            if u is not None:
+                p_tok += int(getattr(u, "prompt_tokens", 0) or 0)
+                c_tok += int(getattr(u, "completion_tokens", 0) or 0)
+        self.state.call_stats.append({
+            "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "step": stat_step,
+            "agent": stat_agent or getattr(agent, "name", "?"),
+            "bloc": stat_bloc,
+            "iteration": stat_iteration,
+            "model": self._name_labels.get(getattr(agent, "name", ""), "?"),
+            "prompt_tokens": p_tok,
+            "completion_tokens": c_tok,
+            "elapsed_s": round(elapsed, 2),
+            "tok_s": round(c_tok / elapsed, 1) if (elapsed > 0 and c_tok) else None,
+        })
+        return content
 
     def _step_context_limit(self) -> int:
         """Limite de caracteres par etape precedente reinjectee dans une tache.
@@ -618,6 +713,7 @@ class RiskAnalysisOrchestrator:
         step: dict,
         previous_production: str = "",
         human_feedback: str = "",
+        iteration: int = 0,
     ) -> str:
         description = self.state.analysis_state.system_description
         rag_query = f"Analyse de risque {step['id']}"
@@ -659,7 +755,10 @@ class RiskAnalysisOrchestrator:
                 f"{human_feedback}\n\n"
             )
         enriched_task += f"## Tache\n{step['task']}"
-        return await self._ask_agent(self.engineer, enriched_task)
+        return await self._ask_agent(
+            self.engineer, enriched_task,
+            stat_step=step["id"], stat_agent="engineer", stat_iteration=iteration,
+        )
 
     def _step_name(self, sid: str) -> str:
         for s in WORKFLOW_STEPS:
@@ -726,6 +825,7 @@ class RiskAnalysisOrchestrator:
         step: dict,
         previous_production: str = "",
         human_feedback: str = "",
+        iteration: int = 0,
     ) -> str:
         """Etape livraison : assemblage PAR BLOCS en plusieurs appels focalises.
 
@@ -744,7 +844,11 @@ class RiskAnalysisOrchestrator:
                 "titre": bloc["titre"],
             })
             task = self._livraison_bloc_task(bloc, previous_production, human_feedback)
-            out = await self._ask_agent(self.secretary, task)
+            out = await self._ask_agent(
+                self.secretary, task,
+                stat_step=step["id"], stat_agent="secretary",
+                stat_bloc=bloc["titre"], stat_iteration=iteration,
+            )
             outputs.append(f"## {bloc['titre']}\n\n{out.strip()}")
             print(f"[livraison] {bloc['titre']} : {len(out)} caracteres ({i}/{total})")
         return "\n\n".join(outputs)
@@ -754,6 +858,7 @@ class RiskAnalysisOrchestrator:
         step: dict,
         engineer_output: str,
         human_feedback: str = "",
+        iteration: int = 0,
     ) -> str:
         reviewer_name = step.get("reviewer")
         reviewer_task_template = step.get("reviewer_task", "")
@@ -805,7 +910,11 @@ class RiskAnalysisOrchestrator:
             f"Tout point doit citer verbatim le passage concerne et etre ancre a une "
             f"section ou un ID de la production — jamais de paraphrase hors contexte."
         )
-        return await self._ask_agent(reviewer, review_task)
+        return await self._ask_agent(
+            reviewer, review_task,
+            stat_step=step["id"], stat_agent=reviewer_name or "reviewer",
+            stat_iteration=iteration,
+        )
 
     async def _human_checkpoint(self, step: dict, engineer_output: str, review_output: str) -> str:
         if self.human_callback:
@@ -853,11 +962,180 @@ class RiskAnalysisOrchestrator:
             "| --- | --- | --- | --- | --- |\n" + "\n".join(rows)
         )
 
-    async def run_full_analysis(self, initial_context: str = "") -> dict:
+    # ------------------------------------------------------------------
+    # Statistiques de generation (v1.3.17)
+    # ------------------------------------------------------------------
+
+    def _phase_stats(self, step_id: str) -> dict:
+        """Agregats d'une phase : appels, tokens, temps de generation, modeles."""
+        rows = [s for s in self.state.call_stats if s.get("step") == step_id]
+        gen = sum(s.get("elapsed_s", 0) or 0 for s in rows)
+        tin = sum(s.get("prompt_tokens", 0) or 0 for s in rows)
+        tout = sum(s.get("completion_tokens", 0) or 0 for s in rows)
+        models = sorted({str(s.get("model", "?")) for s in rows})
+        return {
+            "calls": len(rows),
+            "gen_time_s": round(gen, 1),
+            "tokens_in": tin,
+            "tokens_out": tout,
+            "tok_s": round(tout / gen, 1) if (gen > 0 and tout) else None,
+            "models": models,
+        }
+
+    def _n_steps_done(self) -> int:
+        return len(self.state.models_used)
+
+    def _totals(self, remaining_steps: int = 0) -> dict:
+        """Cumuls : temps de generation, duree hors pauses, ETA, cout estime."""
+        rows = self.state.call_stats
+        gen = sum(s.get("elapsed_s", 0) or 0 for s in rows)
+        tin = sum(s.get("prompt_tokens", 0) or 0 for s in rows)
+        tout = sum(s.get("completion_tokens", 0) or 0 for s in rows)
+        wall = None
+        if self._t_run_start > 0:
+            wall = round(time.time() - self._t_run_start - self._paused_s, 1)
+        eta = None
+        done = self._n_steps_done()
+        if remaining_steps > 0 and done > 0 and gen > 0:
+            eta = round(gen / done * remaining_steps, 1)
+        pin = float(os.getenv("CLOUD_PRICE_INPUT", "0") or 0)
+        pout = float(os.getenv("CLOUD_PRICE_OUTPUT", "0") or 0)
+        cost = None
+        if pin > 0 or pout > 0:
+            cloud = [s for s in rows if str(s.get("model", "")).startswith("cloud:")]
+            cost = round(sum(
+                (s.get("prompt_tokens", 0) or 0) / 1e6 * pin
+                + (s.get("completion_tokens", 0) or 0) / 1e6 * pout
+                for s in cloud
+            ), 3)
+        return {
+            "calls": len(rows),
+            "tokens_in": tin,
+            "tokens_out": tout,
+            "gen_time_s": round(gen, 1),
+            "tok_s": round(tout / gen, 1) if (gen > 0 and tout) else None,
+            "elapsed_no_pause_s": wall,
+            "paused_s": round(self._paused_s, 1),
+            "t_start": self.state.t_start,
+            "t_end": self.state.t_end,
+            "eta_remaining_s": eta,
+            "remaining_steps": remaining_steps,
+            "cost_eur": cost,
+        }
+
+    def _format_total_stats(self, totals: dict) -> str:
+        lines = [
+            f"  Temps de generation cumule : {totals['gen_time_s']:.0f} s",
+        ]
+        if totals.get("elapsed_no_pause_s") is not None:
+            lines.append(
+                f"  Duree ecoulee hors pauses : {totals['elapsed_no_pause_s']:.0f} s "
+                f"(pauses checkpoints : {totals.get('paused_s', 0):.0f} s)"
+            )
+        lines.append(
+            f"  Tokens : {totals['tokens_in']:,} in / {totals['tokens_out']:,} out"
+            + (f" — {totals['tok_s']} tok/s moyen" if totals.get("tok_s") else "")
+        )
+        if totals.get("cost_eur") is not None:
+            lines.append(f"  Cout estime (cloud) : {totals['cost_eur']:.3f} EUR")
+        return "\n".join(lines)
+
+    async def _save_session(self) -> None:
+        """Sauvegarde continue de l'etat dans la session (atomique, silencieuse)."""
+        if not self.session_dir:
+            return
+        try:
+            await asyncio.to_thread(
+                save_session, self.session_dir, self.state.to_dict()
+            )
+        except Exception as exc:
+            print(f"[session] sauvegarde impossible : {exc}")
+
+    def _write_stats_files(self, totals: dict, phases: dict) -> None:
+        """Export stats.md + stats.json a cote du livrable (dans la session)."""
+        if not self.session_dir:
+            return
+        try:
+            sdir = Path(self.session_dir)
+            lines = [
+                "# Statistiques de generation",
+                f"- Session : {sdir.name}",
+                f"- Debut : {self.state.t_start or 'n/a'} — Fin : "
+                f"{self.state.t_end or 'n/a'}",
+                f"- Temps de generation cumule : {totals['gen_time_s']:.0f} s",
+            ]
+            if totals.get("elapsed_no_pause_s") is not None:
+                lines.append(
+                    f"- Duree ecoulee hors pauses : "
+                    f"{totals['elapsed_no_pause_s']:.0f} s "
+                    f"(pauses checkpoints : {totals.get('paused_s', 0):.0f} s)"
+                )
+            lines.append(
+                f"- Tokens : {totals['tokens_in']:,} in / "
+                f"{totals['tokens_out']:,} out"
+                + (f" — {totals['tok_s']} tok/s moyen" if totals.get("tok_s") else "")
+            )
+            if totals.get("cost_eur") is not None:
+                lines.append(f"- Cout estime (cloud) : {totals['cost_eur']:.3f} EUR")
+            lines += [
+                "",
+                "| Phase | Appels | tok in | tok out | Temps gen (s) | tok/s | Modeles |",
+                "| --- | --- | --- | --- | --- | --- | --- |",
+            ]
+            for sid, ph in phases.items():
+                lines.append(
+                    f"| {self._step_name(sid)} | {ph['calls']} | "
+                    f"{ph['tokens_in']:,} | {ph['tokens_out']:,} | "
+                    f"{ph['gen_time_s']:.0f} | {ph['tok_s'] if ph['tok_s'] else '—'} | "
+                    f"{', '.join(ph['models']) or '—'} |"
+                )
+            (sdir / "stats.md").write_text("\n".join(lines), encoding="utf-8")
+            (sdir / "stats.json").write_text(
+                json.dumps({
+                    "totals": totals,
+                    "phases": phases,
+                    "calls": self.state.call_stats,
+                }, ensure_ascii=False, indent=1),
+                encoding="utf-8",
+            )
+            print(f"[stats] exporte : {sdir / 'stats.md'}")
+        except Exception as exc:
+            print(f"[stats] export impossible : {exc}")
+
+    async def run_full_analysis(
+        self, initial_context: str = "", resume_state: Optional[dict] = None
+    ) -> dict:
         all_outputs = {}
+
+        # Session (v1.3.17) : reprise d'un etat existant ou nouveau dossier.
+        if resume_state:
+            self.state = OrchestratorState.from_dict(resume_state)
+            self.session_dir = self.session_dir or str(new_session_dir())
+        elif not self.session_dir:
+            self.session_dir = str(new_session_dir())
+
+        validated_ids: set = set()
+        if resume_state:
+            for sid, v in self.state.human_validations.items():
+                if v and v != "quit":
+                    validated_ids.add(sid)
+            if self.state.outputs.get("livraison"):
+                validated_ids.add("livraison")
+            print(f"[session] reprise : {len(validated_ids)} etape(s) validee(s) "
+                  f"conservee(s) — suite sur les modeles actuels "
+                  f"({os.path.basename(str(self.session_dir))})")
+            await self._emit({
+                "type": "resumed",
+                "n_steps": len(validated_ids),
+                "session": os.path.basename(str(self.session_dir or "")),
+            })
 
         if initial_context:
             self.state.analysis_state.system_description = initial_context
+        if not self.state.t_start:
+            self.state.t_start = time.strftime("%Y-%m-%d %H:%M:%S")
+        self._paused_s = 0.0
+        self._t_run_start = time.time()
 
         # Gestion automatique du contexte : re-detection a chaque analyse
         _AUTO_CONTEXT_CACHE["done"] = False
@@ -873,6 +1151,19 @@ class RiskAnalysisOrchestrator:
 
         for i, step in enumerate(WORKFLOW_STEPS):
             self.state.step_index = i
+
+            # Reprise : les etapes deja validees en session sont conservees
+            # en l'etat (leur production et leurs decisions de points restent
+            # la source de verite) ; la suite s'execute sur les modeles actuels.
+            if step["id"] in validated_ids:
+                print(f"[session] {step['name']} : deja validee, reprise directe.")
+                await self._emit({
+                    "type": "step_skipped",
+                    "step_id": step["id"],
+                    "name": step["name"],
+                })
+                continue
+
             await self._emit({
                 "type": "step_start",
                 "step_id": step["id"],
@@ -897,9 +1188,9 @@ class RiskAnalysisOrchestrator:
 
                 if iteration == 0:
                     if agent_name == "engineer":
-                        production = await self._run_engineer_step(step)
+                        production = await self._run_engineer_step(step, iteration=iteration)
                     else:
-                        production = await self._run_secretary_step(step)
+                        production = await self._run_secretary_step(step, iteration=iteration)
                 else:
                     await self._emit({
                         "type": "step_retry",
@@ -913,16 +1204,22 @@ class RiskAnalysisOrchestrator:
                             step,
                             previous_production=production,
                             human_feedback=self._feedback_section(feedbacks),
+                            iteration=iteration,
                         )
                     else:
                         production = await self._run_secretary_step(
                             step,
                             previous_production=production,
                             human_feedback=self._feedback_section(feedbacks),
+                            iteration=iteration,
                         )
 
                 all_outputs[step["id"]] = production
                 self.state.outputs[step["id"]] = production
+                # Provenance : modele producteur de l'etape (traçabilite)
+                self.state.models_used[step["id"]] = (self.model_labels or {}).get(
+                    agent_name, "?"
+                )
                 await self._emit({
                     "type": "production",
                     "step_id": step["id"],
@@ -931,6 +1228,7 @@ class RiskAnalysisOrchestrator:
                 })
                 print(f"\n[Production - {agent_name}] (iteration {iteration})")
                 print(production[:1500] + ("..." if len(production) > 1500 else ""))
+                await self._save_session()
 
                 review_output = ""
                 if step.get("reviewer"):
@@ -939,6 +1237,7 @@ class RiskAnalysisOrchestrator:
                         step,
                         production,
                         human_feedback="\n".join(feedbacks),
+                        iteration=iteration,
                     )
                     self.state.reviews[step["id"]] = review_output
                     await self._emit({
@@ -948,6 +1247,7 @@ class RiskAnalysisOrchestrator:
                         "text": review_output,
                     })
                     print(review_output[:1500] + ("..." if len(review_output) > 1500 else ""))
+                    await self._save_session()
 
                 if not step["checkpoint"]:
                     break  # etape finale (livraison) : pas de checkpoint humain
@@ -958,7 +1258,9 @@ class RiskAnalysisOrchestrator:
                 print(f"  Point de controle {step['checkpoint']}{suffix} - Validation humaine")
                 print(f"{'─'*50}")
                 print("\nTaper : CONTINUER | QUITTER | ou un feedback pour correction")
+                t_cp = time.time()
                 feedback = await self._human_checkpoint(step, production, review_output)
+                self._paused_s += time.time() - t_cp
                 await self._emit({
                     "type": "checkpoint_answer",
                     "step_id": step["id"],
@@ -994,12 +1296,42 @@ class RiskAnalysisOrchestrator:
                 self.state.human_validations[step["id"]] = feedback
                 iteration += 1
                 print(">> Feedback enregistre, nouvelle iteration...")
+                await self._save_session()
+
+            # Stats de phase (v1.3.17) : appels, tokens, temps de generation
+            phase = self._phase_stats(step["id"])
+            totals = self._totals(remaining_steps=len(WORKFLOW_STEPS) - i - 1)
+            line = (
+                f"[stats] {step['name']} : {phase['calls']} appel(s), "
+                f"{phase['tokens_in']:,} tok in / {phase['tokens_out']:,} tok out, "
+                f"{phase['gen_time_s']:.0f} s de generation"
+            )
+            if phase.get("tok_s"):
+                line += f" ({phase['tok_s']} tok/s)"
+            if phase["models"]:
+                line += f" — {', '.join(phase['models'])}"
+            if totals.get("eta_remaining_s") is not None:
+                line += f" | ETA restant ~{totals['eta_remaining_s'] / 60:.0f} min"
+            print(line)
+            await self._emit({
+                "type": "step_stats",
+                "step_id": step["id"],
+                "phase": phase,
+                "totals": totals,
+            })
+            await self._save_session()
 
             if interrupted:
                 break
 
+        self.state.t_end = time.strftime("%Y-%m-%d %H:%M:%S")
+        totals = self._totals()
         print(f"\n{'='*70}\n  Analyse terminee\n{'='*70}")
-        await self._emit({"type": "done"})
+        print(self._format_total_stats(totals))
+        phases = {sid: self._phase_stats(sid) for sid in self.state.models_used}
+        await self._emit({"type": "done", "totals": totals, "phases": phases})
+        await self._save_session()
+        self._write_stats_files(totals, phases)
         return all_outputs
 
 

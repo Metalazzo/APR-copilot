@@ -65,6 +65,17 @@ Variables d'environnement (ou modifier `config.py`) :
 | `WEB_SEARCH_MAX_RESULTS` | `5` | Nombre de resultats web injectes par etape |
 | `SEARXNG_URL` | — | URL de l'instance SearXNG (`search.formats` avec `json` active) |
 | `TAVILY_API_KEY` | — | Cle API Tavily (si backend tavily) |
+| `CLOUD_PRICE_INPUT` | `0` | Prix d'1M tokens d'entree en EUR (profil cloud) — active le cout estime dans les statistiques |
+| `CLOUD_PRICE_OUTPUT` | `0` | Prix d'1M tokens de sortie en EUR (profil cloud) |
+
+### Sessions sauvegardables et reprise (v1.3.17)
+
+Chaque analyse cree `output/sessions/<horodatage>/` : l'etat complet (productions, relectures, validations et qualifications humaines par point, modele producteur par etape, statistiques) y est ecrit apres chaque production, relecture et decision de checkpoint.
+
+- **QUITTER = mise en pause** : la session reste reprenable
+- **Reprise** : bouton « Reprendre » du panneau Sessions (GUI) ou `python main.py analyze -p <projet> --resume output/sessions/<id>`
+- **Changement de modele entre etapes** : a la reprise, la suite s'execute avec le modele configure au moment du relancement ; les etapes validees restent en l'etat (leur modele producteur est trace)
+- **Statistiques** : par appel (tokens prompt/completion, duree, tok/s), par phase (temps de generation de l'etape, appels, modeles), temps total de generation, duree ecoulee hors pauses, ETA des etapes restantes, cout estime — visibles sur les cartes, dans la popup de checkpoint, dans le journal et exportees en `stats.md`/`stats.json` dans la session
 | `LLM_TIMEOUT` | `600` | Timeout (secondes) par appel LLM — valeur large conseillee en local |
 | `LLM_MAX_RETRIES` | `3` | Nombre de tentatives par appel LLM |
 

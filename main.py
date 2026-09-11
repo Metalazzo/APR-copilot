@@ -54,8 +54,25 @@ async def search_command(args):
 
 
 async def analyze_command(args):
-    if not args.context and not args.context_file:
-        print("ERREUR: Fournissez un contexte via --context ou --context-file.")
+    mode = args.profile or app_config.profiles.agent_profile
+    valid_modes = ("hybrid", "cloud", "local")
+    if mode not in valid_modes:
+        print(f"ERREUR: Profil d'affectation invalide : {mode!r} (attendus : {', '.join(valid_modes)}).")
+        return
+
+    # Reprise d'une session sauvegardee : le contexte initial devient optionnel
+    resume_data = None
+    resume_dir = getattr(args, "resume", None)
+    if resume_dir:
+        from session_store import load_session
+        try:
+            resume_data = load_session(resume_dir)
+        except Exception as exc:
+            print(f"ERREUR: Session illisible : {exc}")
+            return
+        print(f"Session en reprise : {resume_dir}")
+    elif not args.context and not args.context_file:
+        print("ERREUR: Fournissez un contexte via --context ou --context-file (ou --resume).")
         return
 
     context = args.context or ""
@@ -66,12 +83,6 @@ async def analyze_command(args):
         else:
             print(f"ERREUR: Fichier '{args.context_file}' introuvable.")
             return
-
-    mode = args.profile or app_config.profiles.agent_profile
-    valid_modes = ("hybrid", "cloud", "local")
-    if mode not in valid_modes:
-        print(f"ERREUR: Profil d'affectation invalide : {mode!r} (attendus : {', '.join(valid_modes)}).")
-        return
 
     print_banner()
     print(f"Affectation des modeles : {mode}")
@@ -88,6 +99,16 @@ async def analyze_command(args):
     else:  # hybrid : cloud pour les agents complexes, local pour le Secretaire
         cloud_client = clients["cloud"]
         local_client = clients["local"]
+
+    # Etiquettes de modele par agent (traçabilite + statistiques/couts)
+    if mode == "cloud":
+        eng = sec = f"cloud:{app_config.profiles.cloud.model}"
+    elif mode == "local":
+        eng = sec = f"local:{app_config.profiles.local.model}"
+    else:
+        eng = f"cloud:{app_config.profiles.cloud.model}"
+        sec = f"local:{app_config.profiles.local.model}"
+    model_labels = {"engineer": eng, "quality": eng, "client": eng, "secretary": sec}
 
     engineer_wrapper = EngineerAgent(cloud_client)
     quality_wrapper = QualityAgent(cloud_client)
@@ -118,6 +139,8 @@ async def analyze_command(args):
         client=client_wrapper.agent,
         secretary=secretary_wrapper.agent,
         human_callback=interactive_checkpoint,
+        session_dir=resume_dir,
+        model_labels=model_labels,
     )
 
     orchestrator.state.analysis_state.project_name = args.project
@@ -125,7 +148,9 @@ async def analyze_command(args):
     print(f"\nDemarrage de l'analyse pour le projet : {args.project}")
     print(f"Contexte fourni : {context[:500]}...\n")
 
-    outputs = await orchestrator.run_full_analysis(initial_context=context)
+    outputs = await orchestrator.run_full_analysis(
+        initial_context=context, resume_state=resume_data
+    )
 
     output_path, json_path = save_analysis_outputs(
         outputs, args.project, app_config.output_dir
@@ -168,6 +193,11 @@ def main():
         choices=["hybrid", "cloud", "local"],
         default=None,
         help="Affectation des modeles aux agents (defaut : AGENT_PROFILE, sinon hybrid)",
+    )
+    analyze_parser.add_argument(
+        "--resume",
+        default=None,
+        help="Reprendre une session sauvegardee (dossier output/sessions/<id>)",
     )
 
     args = parser.parse_args()

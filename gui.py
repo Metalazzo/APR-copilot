@@ -20,6 +20,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import urllib.request
 from pathlib import Path
 
@@ -28,6 +29,7 @@ from nicegui import ui
 from agents.agents import EngineerAgent, QualityAgent, ClientAgent, SecretaryAgent
 from agents.orchestrator import (
     WORKFLOW_STEPS,
+    OrchestratorState,
     RiskAnalysisOrchestrator,
     client_from_profile,
 )
@@ -35,6 +37,7 @@ from config import ModelProfile, config as app_config
 from output_utils import save_analysis_outputs
 from rag.retriever import invalidate_bm25_cache
 from rag.vector_store import get_collection, ingest_documents
+from session_store import delete_session, list_sessions, load_session
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +60,62 @@ def _collection_stats() -> str:
         return f"Index indisponible : {exc}"
 
 
+def _local_profile() -> ModelProfile:
+    """Profil local construit depuis les champs de la GUI."""
+    return ModelProfile(
+        model=local_model.value or "",
+        base_url=local_base_url.value or "",
+        api_key=local_api_key.value or "not-needed",
+        temperature=float(local_temp.value or 0.3),
+        max_tokens=int(local_max_tokens.value or 16384),
+    )
+
+
+def _cloud_profile() -> ModelProfile:
+    """Profil cloud construit depuis les champs de la GUI."""
+    return ModelProfile(
+        model=cloud_model.value or "",
+        base_url=cloud_base_url.value or "",
+        api_key=cloud_api_key.value or "",
+        temperature=float(cloud_temp.value or 0.3),
+        max_tokens=int(cloud_max_tokens.value or 8192),
+    )
+
+
+def _fmt_phase_line(phase: dict, totals: dict | None = None) -> str:
+    """Ligne de statistiques de phase (carte d'etape)."""
+    if not phase or not phase.get("calls"):
+        return ""
+    parts = [
+        f"⏱ {phase['gen_time_s']:.0f} s de génération",
+        f"{phase['tokens_in']:,} tok in".replace(",", " "),
+        f"{phase['tokens_out']:,} tok out".replace(",", " "),
+    ]
+    if phase.get("tok_s"):
+        parts.append(f"{phase['tok_s']} tok/s")
+    if phase.get("models"):
+        parts.append(", ".join(phase["models"]))
+    line = " · ".join(parts)
+    if totals and totals.get("eta_remaining_s") is not None:
+        line += f" · ETA restant ~{totals['eta_remaining_s'] / 60:.0f} min"
+    return line
+
+
+def _fmt_totals_line(totals: dict) -> str:
+    """Ligne de statistiques globales (fin d'analyse)."""
+    parts = [f"Temps de generation cumule : {totals['gen_time_s']:.0f} s"]
+    if totals.get("elapsed_no_pause_s") is not None:
+        parts.append(f"écoulé hors pauses : {totals['elapsed_no_pause_s']:.0f} s")
+    parts.append(
+        f"{totals['tokens_in']:,} in / {totals['tokens_out']:,} out".replace(",", " ")
+    )
+    if totals.get("tok_s"):
+        parts.append(f"{totals['tok_s']} tok/s moyen")
+    if totals.get("cost_eur") is not None:
+        parts.append(f"coût ~{totals['cost_eur']:.3f} EUR")
+    return " · ".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # Etat global (outil mono-utilisateur en local : une seule analyse a la fois)
 # ---------------------------------------------------------------------------
@@ -66,6 +125,7 @@ analysis_running: bool = False
 step_cards: dict[str, dict] = {}       # step_id -> elements UI
 log = None                             # ui.log, cree dans build_page()
 checkpoint_dialog = None               # ui.dialog, creee dans build_page()
+sessions_container = None              # ui.column du panneau Sessions
 
 
 # ---------------------------------------------------------------------------
@@ -81,69 +141,116 @@ def _safe_notify(message: str, type_: str = "info") -> None:
         log.push(f"[notif] {message}")
 
 
-def _parse_review_points(review_text: str, max_items: int = 12) -> list[dict]:
-    """Extrait les points de la relecture au format canonique :
+_CANON_BLOCK_RE = re.compile(
+    r"^#{3,4}\s*\[?\[?(P\s?\d+|\d+)\]?\]?\s*[—–:-]?\s*(.+?)\s*$",
+    re.MULTILINE,
+)
+_FIELD_LINE_RE = re.compile(
+    r"^-\s*\*{0,2}(Localisation|Extrait|Verdict|Justification|Correction|"
+    r"Recommandation|Statut)\b[^:]*:", re.IGNORECASE
+)
+_BULLET_RE = re.compile(r"^(?:[-*•]|\d+[.)])\s+(.+)$")
 
-        ### [P1] Titre court du point
-        - Localisation : ...
-        - Extrait : « ... »
-        - Verdict : ...
-        - Justification : ...
-        - Correction proposee : ...
 
-    Repli sur l'ancien heuristique (lignes a puces / numerotees, tronquees)
-    si le modele ne suit pas le format canonique : points sans identifiant."""
+def _parse_review_points(review_text: str, max_items: int = 100) -> list[dict]:
+    """Extrait TOUS les points de la relecture — canoniques ET en repli.
+
+    1) Blocs canoniques : '### [P#] Titre' (### ou ####, P# avec ou sans
+       crochets) suivis des champs Localisation/Extrait/Verdict/Justification/
+       Correction (tolere le gras et l'extrait renvoye a la ligne suivante).
+    2) Puces/numerations HORS des blocs canoniques : un relecteur peut
+       melanger les formats — v1.3.16 les ignorait des que des blocs
+       canoniques existaient (points manquants dans la popup, ex. 18 listes
+       mais seulement 15 qualifiables).
+
+    Points retournes dans l'ordre du document. Plafond large (100) : un
+    point laisse de cote est un point que l'humain ne peut pas qualifier."""
     import re
 
-    block_re = re.compile(r"^###\s*\[(P?\d+)\]\s*(.+)$", re.MULTILINE)
-    field_re = re.compile(r"^-\s*([^:]{2,24}):\s*(.*)$")
-    matches = list(block_re.finditer(review_text or ""))
-    points = []
-    for idx, m in enumerate(matches):
-        block = review_text[m.end(): matches[idx + 1].start() if idx + 1 < len(matches) else len(review_text)]
-        raw = m.group(1)
-        pid = f"P{int(raw[1:])}" if raw[1:].isdigit() else raw.upper()
+    text = review_text or ""
+    blocks = list(_CANON_BLOCK_RE.finditer(text))
+    lines_info = []
+    off = 0
+    for line in text.splitlines(keepends=True):
+        lines_info.append((off, line))
+        off += len(line)
+
+    def _in_block(s: str) -> bool:
+        """Ligne appartenant au bloc canonique : vide, champ ('- Cle :') ou
+        continuation d'extrait (« ... »). Une puce libre termine le bloc."""
+        c = s.strip().replace("*", "")
+        if c == "":
+            return True
+        if _FIELD_LINE_RE.match(s):
+            return True
+        return c.startswith("«")
+
+    points: list[tuple[int, dict]] = []
+    consumed: list[tuple[int, int]] = []
+
+    for m in blocks:
+        # Fin du bloc : premiere ligne non-vide/non-champ/non-continuation
+        block_end = len(text)
+        for lo, line in lines_info:
+            if lo < m.end():
+                continue
+            if not _in_block(line):
+                block_end = lo
+                break
+        consumed.append((m.start(), block_end))
+        raw = m.group(1).replace(" ", "")
+        pid = f"P{int(raw)}" if raw.isdigit() else f"P{raw[1:]}"
         p = {"id": pid, "titre": m.group(2).strip(),
              "localisation": "", "extrait": "", "verdict": "",
              "justification": "", "correction": ""}
-        for line in block.splitlines():
-            fm = field_re.match(line.strip())
+        lines = text[m.end():block_end].splitlines()
+        for li, line in enumerate(lines):
+            clean = line.strip().replace("*", "")
+            fm = re.match(r"^-\s*([^:]{2,30}):\s*(.*)$", clean)
             if not fm:
+                # extrait renvoye a la ligne suivante (apres '- Extrait :' vide)
+                if p["extrait"] == "" and clean.startswith("«") and li > 0:
+                    prev = lines[li - 1].strip().replace("*", "").lower()
+                    if prev.startswith("- extrait"):
+                        p["extrait"] = clean.strip("«»").strip()
                 continue
             key = fm.group(1).strip().lower()
-            val = fm.group(2).strip().strip('«»"').strip()
+            val = fm.group(2).strip().strip("«»\"").strip()
             if key.startswith("localisation"):
                 p["localisation"] = val
-            elif key.startswith("extrait"):
-                p["extrait"] = val
+            elif key.startswith(("extrait", "citation")):
+                p["extrait"] = val or p["extrait"]
             elif key.startswith("verdict"):
                 p["verdict"] = val[:40]
             elif key.startswith("justification"):
                 p["justification"] = val
-            elif key.startswith("correction"):
+            elif key.startswith(("correction", "proposition")):
                 p["correction"] = val
         p["text"] = p["titre"]
-        points.append(p)
-        if len(points) >= max_items:
-            break
-    if points:
-        return points
+        points.append((m.start(), p))
 
-    # Repli : ancien heuristique a puces (points non structures)
-    items = []
-    for ln in (review_text or "").splitlines():
-        s = ln.strip()
-        m = re.match(r"^(?:[-*•]|\d+[.\)])\s+(.*)$", s)
-        if m:
-            item = re.sub(r"\*+", "", m.group(1)).strip()
-            if len(item) > 3 and not item.lower().startswith(("http", "source ")):
-                txt = item[:240]
-                items.append({"id": None, "titre": txt, "text": txt,
-                              "localisation": "", "extrait": "", "verdict": "",
-                              "justification": "", "correction": ""})
-        if len(items) >= max_items:
-            break
-    return items
+    # Puces / numerations hors des blocs canoniques (repli combine)
+    off = 0
+    for line in text.splitlines(keepends=True):
+        line_start = off
+        off += len(line)
+        if any(a <= line_start < b for (a, b) in consumed):
+            continue
+        s = line.strip()
+        if _FIELD_LINE_RE.match(s):
+            continue
+        bm = _BULLET_RE.match(s)
+        if not bm:
+            continue
+        item = re.sub(r"\*+", "", bm.group(1)).strip()
+        if len(item) > 3 and not item.lower().startswith(("http", "source ")):
+            txt = item[:240]
+            points.append((line_start, {
+                "id": None, "titre": txt, "text": txt,
+                "localisation": "", "extrait": "", "verdict": "",
+                "justification": "", "correction": ""}))
+    points.sort(key=lambda t: t[0])
+    return [p for _, p in points[:max_items]]
 
 
 checklist_rows: list = []              # lignes OK/KO detail de la popup en cours
@@ -226,12 +333,24 @@ def _open_checkpoint_dialog(step_id: str) -> None:
     dlg_title.set_text(f"Point de contrôle — {card['name']} — version V{version}")
     dlg_prod_md.set_content(card.get("production_text") or "*Production non generee*")
     dlg_review_md.set_content(card.get("review_text") or "*Aucune relecture*")
+    ph = card.get("phase_stats") or {}
+    dlg_stats.set_text(
+        f"Performance de l'étape : {ph.get('calls', 0)} appel(s) · "
+        f"{ph.get('gen_time_s', 0):.0f} s de génération · "
+        f"{ph.get('tokens_in', 0):,} tok in / {ph.get('tokens_out', 0):,} tok out"
+        + (f" · {ph['tok_s']} tok/s" if ph.get("tok_s") else "")
+        + (f" · {', '.join(ph['models'])}" if ph.get("models") else "")
+    )
+    dlg_stats.classes("text-caption text-grey")
 
     # Qualification des points souleves par la relecture (semantique explicite)
     dlg_points_container.clear()
     checklist_rows.clear()
     if pending_here:
         points = _parse_review_points(card.get("review_text") or "")
+        n_canon = sum(1 for p in points if p.get("id"))
+        log.push(f"[relecture] {len(points)} point(s) detecte(s) "
+                 f"({n_canon} canonique(s), {len(points) - n_canon} en repli)")
         decided = decided_points_by_step.get(step_id, {})
         new_points, already_points, current_ids = _split_decided_points(points, decided)
         with dlg_points_container:
@@ -259,16 +378,17 @@ def _open_checkpoint_dialog(step_id: str) -> None:
                                 ui.label(f"({ddet[:80]})").classes("text-caption text-grey")
             # Points a qualifier : enrichis (extra it verbatim, localisation, verdict).
             if new_points:
-                ui.label("Points soulevés par la relecture — qualifiez chacun :").classes(
-                    "text-subtitle2"
-                )
+                ui.label(
+                    f"Points soulevés par la relecture ({len(new_points)}) — "
+                    "qualifiez chacun :"
+                ).classes("text-subtitle2")
                 ui.label(
                     "« À corriger » = le problème est réel, déclenche une re-génération. "
                     "« Sans objet » / « Déjà traité » = pas de correction ; c'est tracé "
                     "dans le livrable sans re-génération."
                 ).classes("text-caption text-grey")
                 with ui.scroll_area().style(
-                    "height: 28vh; border-left: 3px solid #ddd; padding-left: 8px"
+                    "height: 34vh; border-left: 3px solid #ddd; padding-left: 8px"
                 ):
                     for pt in new_points:
                         title = pt.get("titre") or pt.get("text", "")
@@ -462,8 +582,29 @@ async def on_progress(event: dict) -> None:
             card["badge"].set_text(f"Livraison bloc {event.get('bloc', '')}…")
             card["badge"].props("color=teal")
         log.push(f"[livraison] {event.get('titre', '')} ({event.get('bloc', '')})")
+    elif etype == "step_stats":
+        ph = event.get("phase") or {}
+        tt = event.get("totals") or {}
+        if card:
+            card["phase_stats"] = ph
+            card["totals"] = tt
+            if card.get("stats_md") is not None:
+                card["stats_md"].set_content(_fmt_phase_line(ph, tt))
+        log.push(_fmt_phase_line(ph, tt))
+    elif etype == "step_skipped":
+        if card:
+            card["badge"].set_text("Validee (session)")
+            card["badge"].props("color=green")
+        log.push(f"[session] {event.get('name', event.get('step_id', ''))} : "
+                 "deja validee en session, conservee en l'etat")
+    elif etype == "resumed":
+        log.push(f"[session] Reprise de '{event.get('session', '')}' — "
+                 f"{event.get('n_steps', 0)} etape(s) validee(s) conservee(s)")
     elif etype == "done":
         log.push("=== Analyse terminee ===")
+        totals = event.get("totals") or {}
+        if totals:
+            log.push(_fmt_totals_line(totals))
 
 
 # ---------------------------------------------------------------------------
@@ -538,8 +679,12 @@ async def start_analysis():
         ui.notify("Fournissez un contexte (texte ou fichier).", type="negative")
         return
     project = (project_input.value or "").strip() or "Sans_Nom"
+    _apply_env_settings()
+    await _launch_analysis(mode, project, context)
 
-    # Parametres avances lus via env par client_from_profile / _load_prompt
+
+def _apply_env_settings() -> None:
+    """Parametres avances pushes en env (lus par client_from_profile / prompts)."""
     os.environ["LLM_TIMEOUT"] = str(int(timeout_input.value or 1800))
     os.environ["LLM_MAX_RETRIES"] = str(int(retries_input.value or 1))
     os.environ["LLM_REASONING"] = str(reasoning_select.value or "off")
@@ -550,24 +695,21 @@ async def start_analysis():
     os.environ["STEP_CONTEXT_LIMIT"] = str(int(step_context_limit_input.value or 40000))
     os.environ["CONTEXT_AUTO"] = "true" if context_auto_switch.value else "false"
 
-    def _local_profile() -> ModelProfile:
-        return ModelProfile(
-            model=local_model.value or "",
-            base_url=local_base_url.value or "",
-            api_key=local_api_key.value or "not-needed",
-            temperature=float(local_temp.value or 0.3),
-            max_tokens=int(local_max_tokens.value or 16384),
-        )
 
-    def _cloud_profile() -> ModelProfile:
-        return ModelProfile(
-            model=cloud_model.value or "",
-            base_url=cloud_base_url.value or "",
-            api_key=cloud_api_key.value or "",
-            temperature=float(cloud_temp.value or 0.3),
-            max_tokens=int(cloud_max_tokens.value or 8192),
-        )
+async def _launch_analysis(
+    mode: str,
+    project: str,
+    context: str,
+    resume_data: dict | None = None,
+    session_dir: str | None = None,
+) -> None:
+    """Construit les clients/orchestrateur avec les reglages GUI actuels et
+    lance (ou reprend) l'analyse.
 
+    resume_data : etat de session charge — les etapes validees sont conservees
+    en l'etat et la suite s'execute sur le modele choisi au moment de la
+    reprise (changement de modele entre etapes)."""
+    global analysis_running
     try:
         if mode == "cloud":
             cloud_client = local_client = client_from_profile(
@@ -588,6 +730,19 @@ async def start_analysis():
         ui.notify(f"Configuration modele invalide : {exc}", type="negative")
         return
 
+    # Etiquettes de modele par agent (traçabilite + statistiques/couts)
+    cp, lp = _cloud_profile(), _local_profile()
+    if mode == "cloud":
+        eng_label = sec_label = f"cloud:{cp.model}"
+    elif mode == "local":
+        eng_label = sec_label = f"local:{lp.model}"
+    else:
+        eng_label, sec_label = f"cloud:{cp.model}", f"local:{lp.model}"
+    model_labels = {
+        "engineer": eng_label, "quality": eng_label,
+        "client": eng_label, "secretary": sec_label,
+    }
+
     engineer_wrapper = EngineerAgent(cloud_client)
     quality_wrapper = QualityAgent(cloud_client)
     client_wrapper = ClientAgent(cloud_client)
@@ -600,24 +755,56 @@ async def start_analysis():
         secretary=secretary_wrapper.agent,
         human_callback=gui_checkpoint,
         progress_callback=on_progress,
+        session_dir=session_dir,
+        model_labels=model_labels,
     )
     orchestrator.state.analysis_state.project_name = project
 
-    # Remise a zero visuelle des cartes
-    for card in step_cards.values():
-        card["badge"].set_text("En attente")
-        card["badge"].props("color=grey")
-        card["prod_md"].set_content("*Production non generee*")
-        card["production_text"] = ""
-        card["review_text"] = ""
+    if resume_data:
+        try:
+            orchestrator.state = OrchestratorState.from_dict(resume_data)
+        except ValueError as exc:
+            ui.notify(f"Session incompatible : {exc}", type="negative")
+            return
+        # Repeupler les cartes des etapes deja connues de la session
+        for step in WORKFLOW_STEPS:
+            card = step_cards.get(step["id"])
+            if not card:
+                continue
+            out = orchestrator.state.outputs.get(step["id"])
+            if out:
+                card["prod_md"].set_content(out)
+                card["production_text"] = out
+                card["review_text"] = orchestrator.state.reviews.get(step["id"]) or ""
+                v = orchestrator.state.human_validations.get(step["id"])
+                done = (v and v != "quit") or (step["id"] == "livraison")
+                if out and done:
+                    card["badge"].set_text("Validee (session)")
+                    card["badge"].props("color=green")
+    else:
+        # Remise a zero visuelle des cartes
+        for card in step_cards.values():
+            card["badge"].set_text("En attente")
+            card["badge"].props("color=grey")
+            card["prod_md"].set_content("*Production non generee*")
+            card["production_text"] = ""
+            card["review_text"] = ""
+            card["phase_stats"] = {}
+            if card.get("stats_md"):
+                card["stats_md"].set_content("")
 
     analysis_running = True
     run_btn.disable()
     run_progress.set_visibility(True)
-    log.push(f"=== Analyse demarree : {project} (mode {mode}) ===")
+    if resume_data:
+        log.push(f"=== Reprise de session : {project} (mode {mode}) ===")
+    else:
+        log.push(f"=== Analyse demarree : {project} (mode {mode}) ===")
 
     try:
-        outputs = await orchestrator.run_full_analysis(initial_context=context)
+        outputs = await orchestrator.run_full_analysis(
+            initial_context=context, resume_state=resume_data
+        )
         md_path, json_path = await asyncio.to_thread(
             save_analysis_outputs, outputs, project, app_config.output_dir
         )
@@ -632,6 +819,7 @@ async def start_analysis():
             log.push("  - reduire max_tokens")
             log.push("  - desactiver le Thinking du modele dans LM Studio (gain majeur)")
             log.push("  - activer Flash Attention + KV cache q8_0 au chargement")
+            log.push("  - ou reprendre la session plus tard (panneau Sessions)")
             ui.notify(
                 f"Generation trop longue : timeout de {timeout_s} s depasse. "
                 "Pistes dans le journal : augmenter le timeout, reduire max_tokens, "
@@ -645,6 +833,75 @@ async def start_analysis():
         analysis_running = False
         run_btn.enable()
         run_progress.set_visibility(False)
+        _refresh_sessions()
+
+
+async def resume_session(sdir: str) -> None:
+    """Reprend une session sauvegardee : etapes validees conservees, suite
+    sur le modele actuellement configure dans la GUI."""
+    global analysis_running
+    if analysis_running:
+        ui.notify("Une analyse est deja en cours.", type="warning")
+        return
+    try:
+        data = load_session(sdir)
+    except Exception as exc:
+        ui.notify(f"Session illisible : {exc}", type="negative")
+        return
+    mode = mode_radio.value
+    project = (project_input.value or "").strip() or "Sans_Nom"
+    context = (context_input.value or "").strip()
+    _apply_env_settings()
+    await _launch_analysis(mode, project, context, resume_data=data, session_dir=sdir)
+
+
+def _delete_session(sdir: str) -> None:
+    try:
+        delete_session(sdir)
+        log.push(f"[session] supprimee : {Path(sdir).name}")
+        _refresh_sessions()
+    except Exception as exc:
+        ui.notify(f"Suppression impossible : {exc}", type="negative")
+
+
+def _refresh_sessions(*_a) -> None:
+    """Rafraichit le panneau des sessions sauvegardees."""
+    if sessions_container is None:
+        return
+    sessions_container.clear()
+    with sessions_container:
+        try:
+            rows = list_sessions()
+        except Exception as exc:
+            ui.label(f"Lecture des sessions impossible : {exc}").classes(
+                "text-caption text-grey"
+            )
+            return
+        if not rows:
+            ui.label("Aucune session sauvegardee.").classes(
+                "text-caption text-grey"
+            )
+            return
+        for s in rows:
+            with ui.row().classes("w-full items-center justify-between no-wrap"):
+                with ui.column().classes("gap-0 grow"):
+                    ui.label(
+                        f"{s['name']} — {s['steps_validated']} étape(s) validée(s)"
+                    ).classes("text-body2")
+                    models = ", ".join(s["models"]) or "—"
+                    ui.label(
+                        f"{models} · {s['gen_time_s']:.0f}s gen · "
+                        f"{s['tokens_out']:,} tok out".replace(",", " ")
+                    ).classes("text-caption text-grey")
+                with ui.row():
+                    ui.button(
+                        "Reprendre", icon="play_arrow",
+                        on_click=lambda sd=s["dir"]: resume_session(sd),
+                    ).props("flat dense")
+                    ui.button(
+                        icon="delete",
+                        on_click=lambda sd=s["dir"]: _delete_session(sd),
+                    ).props("flat dense color=negative")
 
 
 # ---------------------------------------------------------------------------
@@ -657,7 +914,7 @@ def build_page() -> None:
     global function_calling_switch, timeout_input, retries_input, reasoning_select
     global web_search_switch, web_backend, searxng_url_input, tavily_key_input
     global step_context_limit_input, context_auto_switch
-    global checkpoint_dialog, dlg_title, dlg_prod_md, dlg_review_md, dlg_status
+    global checkpoint_dialog, dlg_title, dlg_prod_md, dlg_review_md, dlg_status, dlg_stats
     global dlg_feedback, btn_continue, btn_quit, btn_feedback
     global dlg_card, dlg_prod_scroll, dlg_review_scroll, btn_maximize, dlg_points_container
     global ingest_dir, ingest_reset, ingest_btn, ingest_progress
@@ -837,17 +1094,30 @@ def build_page() -> None:
                         icon="rate_review",
                         on_click=lambda s=step["id"]: _open_checkpoint_dialog(s),
                     ).props("flat dense")
+                    stats_md = ui.markdown("").classes("text-caption")
                     step_cards[step["id"]] = {
                         "name": step["name"],
                         "badge": badge,
                         "prod_md": prod_md,
                         "production_text": "",
                         "review_text": "",
+                        "stats_md": stats_md,
+                        "phase_stats": {},
+                        "totals": {},
                     }
 
             log = ui.log(max_lines=500).classes("w-full").style("height: 200px")
             log.push("Astuce : cliquez sur le bouton refresh du modele local pour lister")
             log.push("les modeles charges sur le serveur LM Studio.")
+
+            # ------------------------- Panneau Sessions -------------------------
+            with ui.row().classes("w-full items-center"):
+                ui.label("Sessions sauvegardees").classes("text-subtitle1")
+                ui.button(
+                    "Rafraichir", icon="refresh", on_click=_refresh_sessions
+                ).props("flat dense")
+            sessions_container = ui.column().classes("w-full")
+            _refresh_sessions()
 
     # Popup de relecture / decision des checkpoints
     with ui.dialog() as checkpoint_dialog:
@@ -867,6 +1137,7 @@ def build_page() -> None:
                     with ui.scroll_area() as dlg_review_scroll:
                         dlg_review_md = ui.markdown("")
             dlg_points_container = ui.column().classes("w-full")
+            dlg_stats = ui.label("").classes("text-caption text-grey")
             dlg_status = ui.label("").classes("text-caption text-grey")
             dlg_feedback = ui.textarea(
                 "Feedback global (libre, optionnel — structuré si besoin)"
