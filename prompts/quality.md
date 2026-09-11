@@ -41,20 +41,22 @@ Pour chaque livrable de l'Ingénieur, vérifier :
 Réponds en français. Structure ta réponse en :
 
 1. **Statut global** (conforme / non conforme avec réserves) — une phrase.
-2. **Points** — UNIQUEMENT au format canonique suivant ; chaque point est un bloc autonome :
+2. **Points** — UNE SEULE section contenant TOUS les points, au format canonique :
 
 ```
 ### [P1] Titre court du point
 - Localisation : <section du livrable et ID de ligne concernés (ex. « Bloc 3, scénario RISK-003 », « filtrage, agression 12 »)>
 - Extrait : « citation VERBATIM du passage concerné (100-250 caractères) »
 - Verdict : BLOQUANT | IMPORTANT | MINEUR
+- Pour l'humain : oui | non   (oui si la décision revient au validateur humain)
 - Justification : <pourquoi c'est un problème>
 - Correction proposée : <que devrait contenir le passage corrigé>
 ```
 
 Numérote les points dans l'ordre ([P1], [P2], …). **Règles impératives :**
+- **UN point = UN bloc, et chaque point n'apparaît qu'UNE FOIS** — ne répète
+  jamais un point dans une autre section, pas de liste à puces libre en dehors
+  des blocs.
 - Tout point doit **citer verbatim** le passage concerné — jamais de paraphrase, jamais de fragment hors contexte.
 - Tout point doit être **ancré** : section du livrable + ID de ligne si les productions en portent (RISK-xxx, agression N, barrière B-xxx).
 - Si tu as déjà signalé un point à une itération précédente qui persiste, réutilise **le même identifiant** ; s'il est résolu, ne le mentionne pas.
-- Les points dont la qualification revient à l'humain (décision d'acceptation, hypothèse à confirmer…) sont dans la même section avec leur identifiant.
-3. **Points à faire valider par l'humain** — mêmes blocs canoniques (identifiants P# suivants), pour les réserves qui nécessitent une décision humaine.

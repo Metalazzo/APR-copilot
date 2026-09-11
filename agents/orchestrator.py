@@ -140,10 +140,11 @@ IMPORTANT : appuie-toi sur le contexte documentaire (RAG) fourni dans la tache a
 5. Le perimetre est-il coherent ?
 
 Reponds avec :
-- STATUT : [OK / A CORRIGER / INCOMPLET]
-- PROBLEMES BLOQUANTS : [liste ou "aucun"]
-- AVERTISSEMENTS : [liste ou "aucun"]
-- SUGGESTIONS : [liste]""",
+1. STATUT global : [OK / A CORRIGER / INCOMPLET] (une phrase)
+2. Points : UNIQUEMENT les blocs canoniques [P#] definis dans ton prompt systeme
+   (Localisation, Extrait verbatim, Verdict BLOQUANT/IMPORTANT/MINEUR,
+   Justification, Correction proposee). Un point = UN bloc, jamais repete ;
+   aucune liste a puces libre en dehors des blocs.""",
     },
     {
         "id": "filtrage",
@@ -195,10 +196,11 @@ Appuie-toi sur le contexte documentaire (RAG) fourni pour les agressions typique
 5. Le niveau de couverture est-il satisfaisant ?
 
 Reponds avec :
-- STATUT : [OK / A COMPLETER]
-- DIVERGENCE : [non / oui + justification]
-- RISQUES OUBLIES : [liste ou "aucun"]
-- RECLASSIFICATIONS SUGGEREES : [liste ou "aucune"]""",
+1. STATUT global : [OK / A COMPLETER] + divergence oui/non (une phrase)
+2. Points : UNIQUEMENT les blocs canoniques [P#] definis dans ton prompt systeme
+   (Localisation, Extrait verbatim, Verdict BLOQUANT/IMPORTANT/MINEUR,
+   Justification, Correction proposee). Un point = UN bloc, jamais repete ;
+   aucune liste a puces libre en dehors des blocs.""",
     },
     {
         "id": "scenarios",
@@ -226,11 +228,25 @@ Pour chaque scenario, produire un tableau structure avec :
 IMPORTANT :
 - Appuie-toi sur le contexte documentaire (RAG) fourni pour les scenarios types du domaine.
 - Marque explicitement ton niveau de confiance par scenario.
-- Ne presente jamais comme certain un element non supporte par les documents.""",
+- Ne presente jamais comme certain un element non supporte par les documents.
+
+REGROUPEMENT AVANT LIVRAISON (obligatoire — sois malin, pas exhaustif a l'exces) :
+- Une seule ligne par triplet (Fonction/element x Agression/menace x Evenement redoute) :
+  les causes multiples d'un meme evenement redoute se listent dans la colonne
+  "Causes plausibles" — ne cree pas un scenario par cause.
+- Fusionne les scenarios tres similaires (meme fonction ET meme evenement redoute,
+  formulations proches) en gardant la description la plus complete.
+- Ne fusionne JAMAIS des scenarios qui different par la phase de vie, la gravite
+  ou l'evenement redoute (granularite preservee).
+- Trace les fusions dans la colonne Justification : "RISK-005 = fusion de
+  RISK-003 + RISK-008" — aucun ID ne disparait sans trace.
+- Relis ta liste complete avant de livrer : ZERO doublon fonctionnel.""",
         "reviewer_task": """Controle qualite des scenarios de risque generes :
 
 1. Verifie la coherence : cause -> situation dangereuse -> evenement redoute -> consequence
-2. Detecte les doublons manifestes
+2. Detecte les doublons FONCTIONNELS : deux scenarios pour le MEME triplet
+   (fonction/element + evenement redoute) = doublon, quelles que soient les
+   formulations — signale UN point proposant la fusion des deux ID
 3. Verifie le respect du template (toutes les colonnes sont-elles renseignees ?)
 4. Controle le vocabulaire (danger, situation dangereuse, risque, barriere)
 5. Verifie que chaque proposition est tracable a une source
@@ -238,11 +254,13 @@ IMPORTANT :
 7. Y a-t-il des conclusions excessives non supportees ?
 
 Reponds avec :
-- STATUT : [OK / NON CONFORME / RESERVES]
-- PROBLEMES BLOQUANTS : [liste ou "aucun"]
-- DOUBLONS DETECTES : [liste ou "aucun"]
-- INCOHERENCES : [liste ou "aucune"]
-- POINTS A FAIRE VALIDER PAR L'HUMAIN : [liste]""",
+1. STATUT global : [OK / NON CONFORME / RESERVES] (une phrase)
+2. Points : UNIQUEMENT les blocs canoniques [P#] definis dans ton prompt systeme
+   (Localisation, Extrait verbatim, Verdict BLOQUANT/IMPORTANT/MINEUR,
+   Justification, Correction proposee). Un point = UN bloc, jamais repete ;
+   aucune liste a puces libre en dehors des blocs. Un doublon fonctionnel
+   (meme fonction + meme evenement redoute) est UN point proposant la fusion
+   des deux ID.""",
     },
     {
         "id": "barrieres",
@@ -288,11 +306,11 @@ Appuie-toi sur le contexte documentaire (RAG) fourni pour les barrieres types.""
 7. Les recommandations sont-elles actionnables par les equipes ?
 
 Reponds avec :
-- STATUT : [OK / A REVOIR]
-- DIVERGENCE : [non / oui + justification]
-- BARRIERES IRREALISTES : [liste ou "aucune"]
-- BARRIERES TROP GENERIQUES : [liste ou "aucune"]
-- NOUVEAUX RISQUES INTRODUITS : [liste ou "aucun"]""",
+1. STATUT global : [OK / A REVOIR] + divergence oui/non (une phrase)
+2. Points : UNIQUEMENT les blocs canoniques [P#] definis dans ton prompt systeme
+   (Localisation, Extrait verbatim, Verdict BLOQUANT/IMPORTANT/MINEUR,
+   Justification, Correction proposee). Un point = UN bloc, jamais repete ;
+   aucune liste a puces libre en dehors des blocs.""",
     },
     {
         "id": "livraison",

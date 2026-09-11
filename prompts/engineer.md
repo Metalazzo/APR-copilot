@@ -47,6 +47,15 @@ Construire des scénarios plausibles à partir du triplet :
 
 Formuler : situation dangereuse, événement redouté, conséquences.
 
+**Regroupement (obligatoire avant livraison)** : une ligne par triplet
+(fonction/élément · agression/menace · événement redouté). Les causes multiples
+d'un même événement redouté se listent dans la colonne Causes — pas un scénario
+par cause. Fusionne les scénarios très similaires (même fonction ET même
+événement redouté) en gardant la description la plus complète, en traçant les
+fusions (« RISK-005 = fusion de RISK-003 + RISK-008 »). Ne fusionne jamais des
+scénarios qui diffèrent par la phase de vie, la gravité ou l'événement redouté.
+Zéro doublon fonctionnel avant livraison.
+
 ### Étape 5 — Cotation préliminaire
 Si matrice fournie dans les données d'entrée : appliquer strictement l'échelle donnée.
 Si non fournie : estimation qualitative provisoire, marquée "à confirmer".

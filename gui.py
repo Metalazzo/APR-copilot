@@ -20,6 +20,7 @@ import json
 import os
 import re
 import socket
+import unicodedata
 import urllib.request
 from pathlib import Path
 
@@ -155,6 +156,56 @@ _FIELD_LINE_RE = re.compile(
 _BULLET_RE = re.compile(r"^(?:[-*•]|\d+[.)])\s+(.+)$")
 
 
+def _norm_text(s: str) -> str:
+    """Normalisation pour dedoublonner : minuscules, sans accents/ponctuation."""
+    s = unicodedata.normalize("NFKD", (s or "").lower())
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return re.sub(r"[^a-z0-9]+", "", s)
+
+
+def _norm_match(a: str, b: str, min_len: int = 12) -> bool:
+    """Egalite ou prefixe commun (apres normalisation) — detecte les points
+    repetes avec une note ajoutee (ex. « (repete) », « idem P2 ») tout en
+    limitant les faux positifs (seuil sur le cote court)."""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    shorter, longer = (a, b) if len(a) <= len(b) else (b, a)
+    if len(shorter) < min_len:
+        return False
+    return longer.startswith(shorter)
+
+
+def _dedup_points(points: list[dict]) -> list[dict]:
+    """Un point = une entree. Priorite aux blocs canoniques (extrait/verdict
+    disponibles), les puces equivalentes sont ignorees. Les relecteurs
+    repetent parfois le meme point dans plusieurs sections : le parseur
+    combine v1.3.16.1 rendait ces repetitions visibles comme doublons."""
+    seen_norms: list[str] = []
+    seen_ids: set = set()
+    seen: list[dict] = []
+    # Passe 1 : blocs canoniques (dans l'ordre, dedoublonnes par ID puis texte)
+    for p in [p for p in points if p.get("id")]:
+        pid = p.get("id")
+        norm = _norm_text(p.get("text") or p.get("titre") or "")
+        if pid in seen_ids:
+            continue
+        if any(_norm_match(norm, n) for n in seen_norms):
+            continue
+        seen_ids.add(pid)
+        seen_norms.append(norm)
+        seen.append(p)
+    # Passe 2 : puces libres qui ne redonnent pas un point deja tenu
+    for p in [p for p in points if not p.get("id")]:
+        norm = _norm_text(p.get("text") or p.get("titre") or "")
+        if any(_norm_match(norm, n) for n in seen_norms):
+            continue
+        seen_norms.append(norm)
+        seen.append(p)
+    return seen
+
+
 def _parse_review_points(review_text: str, max_items: int = 100) -> list[dict]:
     """Extrait TOUS les points de la relecture — canoniques ET en repli.
 
@@ -242,6 +293,9 @@ def _parse_review_points(review_text: str, max_items: int = 100) -> list[dict]:
         if not bm:
             continue
         item = re.sub(r"\*+", "", bm.group(1)).strip()
+        # une puce qui re-cite un ID de point ("P1 Titre...") : le prefixe est
+        # retire pour que la deduplication par texte normalise fonctionne
+        item = re.sub(r"^\[?(P\d+)\]?\s*[-:—]?\s*", "", item)
         if len(item) > 3 and not item.lower().startswith(("http", "source ")):
             txt = item[:240]
             points.append((line_start, {
@@ -249,21 +303,44 @@ def _parse_review_points(review_text: str, max_items: int = 100) -> list[dict]:
                 "localisation": "", "extrait": "", "verdict": "",
                 "justification": "", "correction": ""}))
     points.sort(key=lambda t: t[0])
-    return [p for _, p in points[:max_items]]
+    return _dedup_points([p for _, p in points[:max_items]])
 
 
 def _split_decided_points(points: list[dict], decided: dict) -> tuple[list[dict], list[dict], set]:
     """Separe les points d'une relecture en : (a nouveaux points a qualifier),
     (b points deja qualifies aux iterations precedentes — non re-soumis) avec
     marquage 're_signale' lorsque le relecteur le re-emet, et (c) les IDs de
-    la relecture courante. Un point deja decide n'est JAMAIS re-soumis."""
+    la relecture courante. Un point deja decide n'est JAMAIS re-soumis.
+
+    L'appariement se fait par ID mais AUSSI par texte normalise : si le
+    relecteur renumerote un point persistant (P1 -> P7), le point reste
+    reconnu comme deja traite (pas de doublon apparent)."""
     current_ids = {p.get("id") for p in points if p.get("id")}
-    new_points = [p for p in points if not (p.get("id") and p["id"] in decided)]
+    decided_norms = [
+        (pid, _norm_text(d.get("text") or d.get("titre") or ""))
+        for pid, d in decided.items()
+    ]
+    new_points = []
+    matched_pids: set = set()
+    for p in points:
+        pnorm = _norm_text(p.get("text") or p.get("titre") or "")
+        matched = None
+        if p.get("id") and p["id"] in decided:
+            matched = p["id"]
+        else:
+            for pid, dn in decided_norms:
+                if _norm_match(pnorm, dn):
+                    matched = pid
+                    break
+        if matched:
+            matched_pids.add(matched)
+        else:
+            new_points.append(p)
     already = []
     for pid, d in decided.items():
         d = dict(d)
         d.setdefault("id", pid)
-        d["re_signale"] = pid in current_ids
+        d["re_signale"] = pid in matched_pids
         already.append(d)
     return new_points, already, current_ids
 
@@ -292,6 +369,10 @@ def _render_step_points(step_id: str, interactive: bool) -> None:
     card = step_cards.get(step_id)
     if card is None or card.get("points_container") is None:
         return
+    # Un rendu consultation ne doit JAMAIS ecraser une qualification en cours
+    if not interactive and pending_checkpoint.get("step_id") == step_id \
+            and pending_checkpoint.get("future") is not None:
+        return
     review_text = card.get("review_text") or ""
     points = _parse_review_points(review_text)
     n_canon = sum(1 for p in points if p.get("id"))
@@ -299,34 +380,36 @@ def _render_step_points(step_id: str, interactive: bool) -> None:
     new_points, already_points, current_ids = _split_decided_points(points, decided)
 
     if interactive:
+        checklist_rows.clear()
         log.push(f"[relecture] {len(points)} point(s) detecte(s) "
                  f"({n_canon} canonique(s), {len(points) - n_canon} en repli)")
 
     container = card["points_container"]
     container.clear()
     with container:
-        # Points deja qualifies aux iterations precedentes : lecture seule,
-        # repris tels quels, jamais re-soumis a l'humain.
+        # Points deja qualifies aux iterations precedentes : replie par defaut
+        # (cliquer pour developper), lecture seule, jamais re-soumis a l'humain.
         if already_points:
-            ui.label(
-                "Points déjà qualifiés (itérations précédentes) — repris tels quels, "
-                "tracés dans le rapport final :"
-            ).classes("text-subtitle2")
-            with ui.scroll_area().style(
-                "height: 9vh; border-left: 3px solid #c8e6c9; padding-left: 8px"
-            ):
-                for d in already_points:
-                    v = int(d.get("iteration", 0)) + 1
-                    dtxt = (d.get("text") or d.get("titre") or "")[:140]
-                    ddet = (d.get("detail") or "").strip()
-                    label = f"[{d.get('id')}] {d.get('decision', '?')} — {dtxt} — V{v}"
-                    if d.get("re_signale"):
-                        label += " (re-signalé par le relecteur mais conservé)"
-                    with ui.row().classes("w-full items-center no-wrap"):
-                        ui.icon("check_circle", color="grey").style("font-size: 14px")
-                        ui.label(label).classes("grow text-caption")
-                        if ddet:
-                            ui.label(f"({ddet[:80]})").classes("text-caption text-grey")
+            with ui.expansion(
+                f"Déjà qualifiés ({len(already_points)}) — repris tels quels, "
+                "tracés dans le rapport final (cliquer pour déplier)",
+                icon="done_all",
+            ).classes("w-full"):
+                with ui.scroll_area().style(
+                    "height: 9vh; border-left: 3px solid #c8e6c9; padding-left: 8px"
+                ):
+                    for d in already_points:
+                        v = int(d.get("iteration", 0)) + 1
+                        dtxt = (d.get("text") or d.get("titre") or "")[:140]
+                        ddet = (d.get("detail") or "").strip()
+                        label = f"[{d.get('id')}] {d.get('decision', '?')} — {dtxt} — V{v}"
+                        if d.get("re_signale"):
+                            label += " (re-signalé par le relecteur mais conservé)"
+                        with ui.row().classes("w-full items-center no-wrap"):
+                            ui.icon("check_circle", color="grey").style("font-size: 14px")
+                            ui.label(label).classes("grow text-caption")
+                            if ddet:
+                                ui.label(f"({ddet[:80]})").classes("text-caption text-grey")
 
         if interactive:
             if new_points:

@@ -1,5 +1,53 @@
 # Changelog
 
+## [1.3.19] - 2026-09-11
+
+### Corrige — doublons dans la relecture (nouvelle interface)
+
+Cause racine : le relecteur etait instruit pour lister les points en DEUX
+sections (« Points » + « Points a faire valider par l'humain ») et repetait le
+meme point ; les 4 consignes d'etape imposaient en plus un format libre a
+puces contradictoire avec le format canonique — le parseur combiné v1.3.16.1
+rendait ces repetitions visibles comme doublons.
+
+- **Prompts relecteurs** (`quality.md`, `client.md`) : UNE SEULE section
+  « Points » — chaque point n'apparait qu'UNE FOIS, pas de puce libre hors
+  blocs, champ optionnel « Pour l'humain : oui | non »
+- **4 consignes d'etape** (`reviewer_task`) reecrites : alignement sur le
+  format canonique [P#] (fin des listes libres « Reponds avec : ... »)
+- **Deduplication robuste dans la GUI** (filet de secours) : normalisation
+  (minuscules/sans accents) + match par prefixe ; un bloc ecrase la puce
+  equivalente, un bloc dont l'ID est deja vu est ignore, puces dedoublonnees ;
+  prefixe d'ID (« P1 Titre... ») retire des puces avant comparaison
+- **Dedup entre iterations** : un point « nouveau » dont le texte normalise
+  correspond a un point deja qualifie (renumerotation P1 -> P7) est traité
+  comme re-signale — non re-soumis a l'humain
+- **Garde-fous** : le rendu consultation n'ecrase plus une qualification en
+  attente ; la checklist est videe a chaque rendu interactif
+
+### Modifie — deja qualifies replies (gain de place verticale)
+
+- La section « Deja qualifies (iterations precedentes) » est desormais une
+  **zone repliée** : cliquer pour developper — elle n'occupe plus de place
+  par defaut.
+
+### Ajoute — regroupement des scenarios (l'Ingenieur « malin »)
+
+- Tache de l'etape 3 : **REGROUPEMENT AVANT LIVRAISON** — une ligne par
+  triplet (fonction x agression/menace x evenement redoute), causes multiples
+  regroupees dans la colonne Causes, fusion des scenarios tres similaires en
+  gardant la description la plus complete, fusions tracees (« RISK-005 =
+  fusion de RISK-003 + RISK-008 »), zero doublon fonctionnel avant livraison.
+  Aucune fusion d'etapes differentes par phase de vie/gravite (granularite
+  preservee).
+- `prompts/engineer.md` etape 4 : meme principe en dur.
+- Relecture scénarios : detection des doublons FONCTIONNELS (meme triplet
+  fonction + evenement redoute = doublon quelles que soient les formulations,
+  fusion proposee en citant les deux ID).
+
+### Rollback
+- Etat pre-modification : commit `249e77b`
+
 ## [1.3.18] - 2026-09-11
 
 ### Ajoute — GUI par onglets (maquette A), documents a chaud, ouverture sur l'IP LAN
