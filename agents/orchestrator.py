@@ -417,8 +417,12 @@ Pour chaque risque non reduit a un niveau acceptable :
         "titre": "Bloc 5 — Points ouverts pour validation humaine",
         "sources": ["cadrage", "filtrage", "scenarios", "barrieres"],
         "consigne": """Produis UNIQUEMENT le Bloc 5 du livrable : points ouverts pour validation humaine.
-Liste priorisee : ambiguites, hypotheses critiques, elements manquants, decisions attendues — avec la 'Decision humaine' (OK/KO + detail) par point d'apres la section Decisions humaines, si fournie.
-Reprends tous les points a valider mentionnes dans les sections fournies.""",
+Format IMPOSE — tableau Markdown COMPACT, UNE ligne courte par point, chaque ligne TERMINEE :
+| Point | Ref (ancre : ID de scenario/item/barriere) | Decision humaine (OK/KO + detail) | Statut |
+- Reprends TOUS les points a valider mentionnes dans les sections fournies (aucun ne disparait) ; regroupe les points strictement identiques en une seule ligne.
+- Pas de paragraphe, pas de justification longue (le detail reste dans les etapes sources) ; classe par priorite (bloquant d'abord).
+- La Decision humaine vient de la section Decisions humaines, si fournie.
+- Chaque ligne de tableau doit etre COMPLETE et fermee par | — jamais coupee, quel que soit le nombre de points.""",
     },
 ]
 
@@ -556,11 +560,20 @@ class RiskAnalysisOrchestrator:
         content = str(messages[-1].content) if messages else ""
         # Usage OpenAI standard (retourne par LM Studio comme par les API cloud)
         p_tok = c_tok = 0
+        usage_estimated = False
         for m in messages:
             u = getattr(m, "models_usage", None)
             if u is not None:
                 p_tok += int(getattr(u, "prompt_tokens", 0) or 0)
                 c_tok += int(getattr(u, "completion_tokens", 0) or 0)
+        # Repli : certains serveurs (LM Studio en streaming) ne remontent pas
+        # l'usage -> estimation par caracteres, marquee comme telle.
+        if c_tok == 0 and content:
+            c_tok = max(1, int(len(content) / 3.5))
+            usage_estimated = True
+        if p_tok == 0 and task:
+            p_tok = max(1, int(len(task) / 3.5))
+            usage_estimated = True
         self.state.call_stats.append({
             "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
             "step": stat_step,
@@ -570,6 +583,7 @@ class RiskAnalysisOrchestrator:
             "model": self._name_labels.get(getattr(agent, "name", ""), "?"),
             "prompt_tokens": p_tok,
             "completion_tokens": c_tok,
+            "usage_estime": usage_estimated,
             "elapsed_s": round(elapsed, 2),
             "tok_s": round(c_tok / elapsed, 1) if (elapsed > 0 and c_tok) else None,
         })
@@ -859,6 +873,27 @@ class RiskAnalysisOrchestrator:
         )
         return "\n\n".join(parts)
 
+    def _looks_truncated(self, text: str) -> bool:
+        """Detection de troncature (plafond max_tokens) : la derniere ligne
+        non vide est une ligne de tableau NON terminee (ouvre par |, non
+        fermee par |)."""
+        lines = [ln.rstrip() for ln in (text or "").strip().splitlines()]
+        while lines and not lines[-1].strip():
+            lines.pop()
+        if not lines:
+            return False
+        last = lines[-1]
+        return last.startswith("|") and not last.endswith("|")
+
+    def _merge_continuation(self, partial: str, cont: str) -> str:
+        """Fusionne une production partielle et sa continuation : la derniere
+        ligne incomplete du bloc est RETIREE (le continuation la reecrit en
+        entier), puis le continuation est ajoute."""
+        partial = partial.rstrip()
+        if "\n" in partial:
+            partial = partial.rsplit("\n", 1)[0]
+        return partial + "\n" + cont.strip()
+
     async def _run_secretary_step(
         self,
         step: dict,
@@ -872,7 +907,8 @@ class RiskAnalysisOrchestrator:
         productions (sortie plafonnee a max_tokens) : la generation s'arretait
         en cours de route (livrable ampute du Bloc 4/5). Chaque bloc est
         desormais produit par un appel dedie, puis les blocs sont concatenes.
-        """
+        Si un bloc est coupe par le plafond de sortie (tableau non termine),
+        un appel de CONTINUATION complete la generation (max 2)."""
         outputs = []
         total = len(LIVRAISON_BLOCS)
         for i, bloc in enumerate(LIVRAISON_BLOCS, 1):
@@ -888,9 +924,53 @@ class RiskAnalysisOrchestrator:
                 stat_step=step["id"], stat_agent="secretary",
                 stat_bloc=bloc["titre"], stat_iteration=iteration,
             )
+            # Continuation si le plafond de sortie a coupe la generation
+            attempts = 0
+            while self._looks_truncated(out) and attempts < 2:
+                attempts += 1
+                print(f"[livraison] {bloc['titre']} : sortie coupee par le plafond "
+                      f"-> continuation {attempts}/2")
+                await self._emit({
+                    "type": "delivery_bloc_continuation",
+                    "step_id": step["id"],
+                    "bloc": f"{i}/{total}",
+                    "titre": bloc["titre"],
+                    "attempt": attempts,
+                })
+                cont_task = (
+                    f"## Tache — CONTINUATION d'un bloc interrompu\n"
+                    f"{bloc['consigne']}\n\n"
+                    f"## Fin de la production partielle deja generee (contexte)\n"
+                    f"{out[-8000:]}\n\n"
+                    f"## Consigne\n"
+                    f"La generation a ete coupee par le plafond de sortie. "
+                    f"Reecris d'abord EN ENTIER la derniere ligne de tableau "
+                    f"(celle qui etait coupee, complete sur une seule ligne), "
+                    f"puis poursuis le bloc jusqu'a sa fin complete. N'ajoute "
+                    f"aucun preambule, ne repete pas les lignes deja produites. "
+                    f"Français, Markdown, lignes de tableau terminees."
+                )
+                cont = await self._ask_agent(
+                    self.secretary, cont_task,
+                    stat_step=step["id"], stat_agent="secretary",
+                    stat_bloc=f"{bloc['titre']} (continuation {attempts})",
+                    stat_iteration=iteration,
+                )
+                out = self._merge_continuation(out, cont)
             outputs.append(f"## {bloc['titre']}\n\n{out.strip()}")
             print(f"[livraison] {bloc['titre']} : {len(out)} caracteres ({i}/{total})")
-        return "\n\n".join(outputs)
+
+        livrable = "\n\n".join(outputs)
+        # Verification de completude : 5 en-tetes + pas de tableau coupe en fin
+        missing = [b["titre"] for b in LIVRAISON_BLOCS if f"## {b['titre']}" not in livrable]
+        if missing:
+            print(f"[livrable] ATTENTION : bloc(s) absent(s) : {missing}")
+            await self._emit({"type": "livrable_incomplet", "missing": missing})
+        if self._looks_truncated(livrable):
+            print("[livrable] ATTENTION : la derniere ligne semble tronquee "
+                  "(plafond de generation)")
+            await self._emit({"type": "livrable_incomplet", "truncated": True})
+        return livrable
 
     async def _run_reviewer_step(
         self,
@@ -1158,8 +1238,13 @@ class RiskAnalysisOrchestrator:
             for sid, v in self.state.human_validations.items():
                 if v and v != "quit":
                     validated_ids.add(sid)
-            if self.state.outputs.get("livraison"):
+            if self.state.outputs.get("livraison") and os.getenv(
+                "LIVRAISON_FORCE", ""
+            ).lower() not in ("1", "true", "yes"):
                 validated_ids.add("livraison")
+            elif os.getenv("LIVRAISON_FORCE", "").lower() in ("1", "true", "yes"):
+                print("[session] LIVRAISON_FORCE : la livraison sera re-generee "
+                      "seule (les etapes validees restent conservees)")
             print(f"[session] reprise : {len(validated_ids)} etape(s) validee(s) "
                   f"conservee(s) — suite sur les modeles actuels "
                   f"({os.path.basename(str(self.session_dir))})")

@@ -1,5 +1,41 @@
 # Changelog
 
+## [1.3.21] - 2026-09-16
+
+### Corrige — livrable final tronque en pleine ligne de tableau (fin à « 74 »)
+
+Constat sur `Test_Projet_analyse.md` (session du 15/09) : le livrable (272 583
+caractères) se coupait en PLEINE ligne de tableau (`| 74` puis rien) — le Bloc
+5 « Points ouverts » est sans limite (tous les points à valider d'une analyse
+de ~200k caractères de productions) et sa génération a buté sur le plafond
+`max_tokens` de LM Studio, sans aucun contrôle de complétude avant
+sauvegarde.
+
+- **Détection de troncature par bloc** : dernière ligne de tableau ouverte
+  (`|`, non fermée) = génération coupée → **appel de CONTINUATION**
+  (max 2) : réécrire en entier la ligne coupée puis poursuivre le bloc — le
+  livrable est complet même au-delà du plafond. Stats taggées
+  `(continuation n)`.
+- **Bloc 5 COMPACT** (format imposé) : tableau serré `Point | Ref (ancre) |
+  Décision humaine | Statut` — une ligne courte par point, doublons
+  strictement identiques regroupés, lignes toujours terminées par `|`.
+- **Vérification de complétude** : les 5 en-têtes `## Bloc` doivent être
+  présents et la fin ne doit pas être tronquée ; sinon log + événement
+  `livrable_incomplet`.
+- **Sauvegarde honnête des partiels** (`output_utils`) : si l'analyse est
+  interrompue avant la livraison, le `.md` porte un bandeau
+  `⚠️ ANALYSE INCOMPLÈTE (interrompue avant la livraison)` au lieu d'être
+  présenté comme le rapport final ; le JSON gagne un flag `complete`.
+- **Tokens estimés** : si LM Studio ne remonte pas l'usage (streaming), les
+  stats estiment tokens = caractères / 3.5, marquées `usage_estime: true` —
+  tok/s et coûts visibles même sans usage rapporté.
+- **`--force-delivery`** (CLI) / `LIVRAISON_FORCE=true` (env) : à la reprise,
+  re-générer la LIVRAISON seule (les étapes validées restent conservées) —
+  corrige un livrable tronqué sans refaire les 10 h de génération.
+
+### Rollback
+- Etat pre-modification : commit `6647478`
+
 ## [1.3.20] - 2026-09-16
 
 ### Corrige — points de relecture « qui ne renvoient a rien » (ancrage de bout en bout)

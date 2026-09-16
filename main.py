@@ -84,6 +84,10 @@ async def analyze_command(args):
             print(f"ERREUR: Fichier '{args.context_file}' introuvable.")
             return
 
+    if getattr(args, "force_delivery", False):
+        os.environ["LIVRAISON_FORCE"] = "true"
+        print("LIVRAISON_FORCE : la livraison sera re-generee seule a la reprise.")
+
     print_banner()
     print(f"Affectation des modeles : {mode}")
     print(f"Modele cloud : {app_config.profiles.cloud.model}")
@@ -198,6 +202,12 @@ def main():
         "--resume",
         default=None,
         help="Reprendre une session sauvegardee (dossier output/sessions/<id>)",
+    )
+    analyze_parser.add_argument(
+        "--force-delivery",
+        action="store_true",
+        help="A la reprise : re-generer la LIVRAISON seule (les etapes validees"
+             " restent conservees) — utile si le livrable etait tronque",
     )
 
     args = parser.parse_args()

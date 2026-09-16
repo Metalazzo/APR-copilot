@@ -90,6 +90,14 @@ ingerez-la via le tiroir « Documents RAG ».
   le top_k — activable via `RAG_RERANK=true` (defaut off), a tester en vitesse
   CPU/GPU avant activation.
 
+### LIVRAISON_FORCE / --force-delivery (v1.3.21)
+
+A la reprise d'une session dont le livrable etait tronque :
+`python main.py analyze -p <projet> --resume output/sessions/<id> --force-delivery`
+re-genere la LIVRAISON seule (les etapes validees restent conservees). Si un
+bloc est coupe par le plafond de generation, une continuation complete
+automatiquement la generation.
+
 ### Sessions sauvegardables et reprise (v1.3.17)
 
 Chaque analyse cree `output/sessions/<horodatage>/` : l'etat complet (productions, relectures, validations et qualifications humaines par point, modele producteur par etape, statistiques) y est ecrit apres chaque production, relecture et decision de checkpoint.
