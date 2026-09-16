@@ -37,6 +37,27 @@ async def ingest_command(args):
     print(f"Collection : {app_config.rag.collection_name}")
 
 
+async def sessions_command(args):
+    """Liste les sessions sauvegardees avec la commande de reprise prete a copier."""
+    from session_store import SESSIONS_ROOT, list_sessions
+
+    rows = list_sessions()
+    if not rows:
+        print(f"Aucune session sauvegardee dans {SESSIONS_ROOT}")
+        return
+    print(f"Sessions sauvegardees ({SESSIONS_ROOT}) :\n")
+    for s in rows:
+        print(f"  {s['name']}  —  {s['steps_validated']} etape(s) validee(s)  ·  "
+              f"{s['gen_time_s']:.0f}s de generation  ·  "
+              f"{s['tokens_out']:,} tok out".replace(",", " "))
+        if s["models"]:
+            print(f"      modeles : {', '.join(s['models'])}")
+        print(f"      reprendre : python main.py analyze -p <projet> "
+              f"--resume {s['dir'].replace(os.sep, '/')}"
+              + (f" [--force-delivery si le livrable etait tronque]"))
+        print()
+
+
 async def search_command(args):
     from rag.retriever import retrieve, format_retrieved_context
 
@@ -69,6 +90,12 @@ async def analyze_command(args):
             resume_data = load_session(resume_dir)
         except Exception as exc:
             print(f"ERREUR: Session illisible : {exc}")
+            from session_store import list_sessions
+            rows = list_sessions()
+            if rows:
+                print("\nSessions disponibles :")
+                for s in rows:
+                    print(f"  - {s['dir'].replace(os.sep, '/')}")
             return
         print(f"Session en reprise : {resume_dir}")
     elif not args.context and not args.context_file:
@@ -210,12 +237,18 @@ def main():
              " restent conservees) — utile si le livrable etait tronque",
     )
 
+    sessions_parser = subparsers.add_parser(
+        "sessions", help="Lister les sessions sauvegardees (pour --resume)"
+    )
+
     args = parser.parse_args()
 
     if args.command == "ingest":
         asyncio.run(ingest_command(args))
     elif args.command == "search":
         asyncio.run(search_command(args))
+    elif args.command == "sessions":
+        asyncio.run(sessions_command(args))
     elif args.command == "analyze":
         asyncio.run(analyze_command(args))
     else:

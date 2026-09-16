@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.3.22] - 2026-09-16
+
+### Ajoute — `python main.py sessions` (liste des sessions + reprise prete a copier)
+
+- Nouvelle commande CLI : liste les sessions sauvegardees (etapes validees,
+  temps de generation, modeles producteurs) avec la commande `--resume`
+  exacte prete a copier (avec rappel de `--force-delivery` si besoin)
+- `--resume` : le message d'erreur liste desormais les sessions disponibles au
+  lieu de seulement « introuvable » — evite la confusion sur le nom de dossier
+  (constatee : le dossier porte un horodatage, pas le nom du projet)
+
+### Rollback
+- Etat pre-modification : commit `aaf6afc`
+
 ## [1.3.21] - 2026-09-16
 
 ### Corrige — livrable final tronque en pleine ligne de tableau (fin à « 74 »)
