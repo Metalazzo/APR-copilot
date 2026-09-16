@@ -1,5 +1,50 @@
 # Changelog
 
+## [1.3.20] - 2026-09-16
+
+### Corrige — points de relecture « qui ne renvoient a rien » (ancrage de bout en bout)
+
+Cote productions (l'ancrage devient possible) :
+- **Filtrage** : chaque item porte sa **Ref** — le numero de l'item generique
+  evalue (1 a 42) ; une ligne sans Ref n'est plus livrable
+- **Barrieres** : chaque barriere porte un **ID** `B-RISK-XXX-nn` rattache a
+  son scenario
+- Scenarios (RISK-xxx) et cadrage (sections numerotees) : deja ancrees
+
+Cote relecteurs :
+- `quality.md`/`client.md` : Localisation = **ID de ligne precis obligatoire**
+  (jamais « le tableau ») ; Extrait = copie exacte ; pour une **ABSENCE**
+  (barriere manquante…), citer la ligne ou elle devrait figurer avec
+  `ABSENCE :` ; **un point non ancrable n'est pas un point exploitable**
+
+Cote GUI (verification objective de l'ancrage) :
+- **⚠ non ancré** : point sans Localisation ET sans Extrait — le rate est du
+  relecteur, pas du lecteur
+- **⚠ extrait introuvable** : l'extrait cite ne figure pas (en normalise) dans
+  la production affichee — le relecteur a reformule/invente : juger avec
+  prudence
+- **Le feedback repart ANCRE** : `- [A CORRIGER] [P3] Titre — Localisation :
+  filtrage, item 33 — Extrait : « … » — detail : …` — la re-generation de
+  l'Ingenieur est auto-suffisante (elle ne depend plus de retrouver P3)
+
+### Ameliore — RAG : normalisation francaise + HYBRID_ALPHA + dedup
+
+- **BM25 normalise** : accents plies + stop-words francais (index ET requete,
+  meme tokenisation) — « dégazage » matche desormais « degazage » ; les chunks
+  BM25 gardent leurs **vraies metadonnees** (bug corrige : la source reelle du
+  fichier etait remplacee par un faux `source=bm25`, perdant la provenance)
+- **`HYBRID_ALPHA` reellement branche** sur les poids RRF (0.5/0.5 etait en dur)
+- **Dedup des voisins adjacents** du meme fichier (±1 chunk) apres la fusion —
+  diversifie le contexte injecte (`RAG_DEDUP_ADJACENT=true`, defaut actif)
+- Chunks de score nul ecartes du top_k
+
+### En file (roadmap, option B)
+- Re-ranker local `BAAI/bge-reranker-v2-m3` (`RAG_RERANK=true`, defaut off) —
+  cf. README « En file ».
+
+### Rollback
+- Etat pre-modification : commit `56dbed3`
+
 ## [1.3.19] - 2026-09-11
 
 ### Corrige — doublons dans la relecture (nouvelle interface)

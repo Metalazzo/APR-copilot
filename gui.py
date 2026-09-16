@@ -306,6 +306,36 @@ def _parse_review_points(review_text: str, max_items: int = 100) -> list[dict]:
     return _dedup_points([p for _, p in points[:max_items]])
 
 
+def _anchor_flags(pt: dict, production_text: str | None) -> tuple[bool, bool]:
+    """Verification objective de l'ancrage d'un point de relecture.
+
+    Retourne (non_ancre, extrait_introuvable) :
+    - non ancre : NI Localisation NI Extrait renseignes — le relecteur a
+      deraille, pas le lecteur humain
+    - extrait introuvable : l'extrait cite ne figure pas (en normalise) dans
+      la production affichee — le relecteur a reformule/invente"""
+    loc = (pt.get("localisation") or "").strip()
+    ex = (pt.get("extrait") or "").strip()
+    no_anchor = not (loc or ex)
+    extrait_missing = False
+    if ex and production_text:
+        n = _norm_text(ex)[:100]
+        if n and n not in _norm_text(production_text):
+            extrait_missing = True
+    return no_anchor, extrait_missing
+
+
+def _anchor_labels(pt: dict, production_text: str | None) -> list[tuple[str, str]]:
+    """Libelles de badges d'ancrage : [(libelle, couleur)]."""
+    no_anchor, extrait_missing = _anchor_flags(pt, production_text)
+    labels = []
+    if no_anchor:
+        labels.append(("⚠ non ancré (ni localisation ni extrait — raté du relecteur)", "brown"))
+    elif extrait_missing:
+        labels.append(("⚠ extrait introuvable dans la production — juger avec prudence", "deep-orange"))
+    return labels
+
+
 def _split_decided_points(points: list[dict], decided: dict) -> tuple[list[dict], list[dict], set]:
     """Separe les points d'une relecture en : (a nouveaux points a qualifier),
     (b points deja qualifies aux iterations precedentes — non re-soumis) avec
@@ -444,6 +474,10 @@ def _render_step_points(step_id: str, interactive: bool) -> None:
                                     clearable=True,
                                 ).props("dense")
                                 ui.label(prefix + title).classes("grow text-body2")
+                            for lbl, col in _anchor_labels(pt, card.get("production_text")):
+                                ui.label(lbl).classes("text-caption").style(
+                                    f"color: #b26a00; border-left: 3px solid {col}; padding-left: 6px"
+                                )
                             if pt.get("extrait"):
                                 ui.label("Extrait :").classes("text-caption text-grey")
                                 ui.code(pt["extrait"].strip()).classes("w-full").style(
@@ -463,7 +497,9 @@ def _render_step_points(step_id: str, interactive: bool) -> None:
                                 ).props("dense outlined").style("width: 320px")
                             checklist_rows.append(
                                 {"id": pt.get("id"), "text": title, "toggle": tog,
-                                 "detail": det}
+                                 "detail": det,
+                                 "localisation": pt.get("localisation", ""),
+                                 "extrait": pt.get("extrait", "")}
                             )
                 if current_orchestrator is not None and current_orchestrator.state.added_docs:
                     ui.label(
@@ -548,6 +584,23 @@ def decide(value: str) -> None:
     log.push(f">> Checkpoint {step_id} : {value[:80]}")
 
 
+def _compose_point_line(label: str, row: dict) -> str:
+    """Ligne de qualification AVEC l'ancrage : la re-generation de l'Ingénieur
+    reçoit la localisation + l'extrait verbatim (tache auto-suffisante)."""
+    pid = row.get("id")
+    line = f"- [{label}] " + (f"[{pid}] " if pid else "") + (row.get("text") or "")
+    loc = (row.get("localisation") or "").strip()
+    ex = (row.get("extrait") or "").strip()
+    detail = (row.get("detail") or "").strip()
+    if loc:
+        line += f" — Localisation : {loc}"
+    if ex:
+        line += f" — Extrait : « {ex[:200]} »"
+    if detail:
+        line += f" — detail : {detail}"
+    return line
+
+
 def send_feedback() -> None:
     """Compose un feedback structure qualifie : A CORRIGER / SANS OBJET /
     DEJA TRAITE, avec version de la production et commentaire global.
@@ -569,10 +622,9 @@ def send_feedback() -> None:
         detail = (row["detail"].value or "").strip()
         label = {"corriger": "A CORRIGER", "sans_objet": "SANS OBJET",
                  "deja_traite": "DEJA TRAITE"}[choice]
-        pid = row.get("id")
-        line = f"- [{label}] " + (f"[{pid}] " if pid else "") + row["text"]
-        if detail:
-            line += f" — {detail}"
+        # L'ancrage part avec la qualification : la re-generation de l'Ingénieur
+        # reçoit la localisation + l'extrait verbatim (tache auto-suffisante)
+        line = _compose_point_line(label, {**row, "detail": detail})
         qualified.append(line)
         if choice == "corriger":
             corriger_count += 1

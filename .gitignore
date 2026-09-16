@@ -8,3 +8,4 @@ models/
 *.egg-info/
 .venv/
 venv/
+markdown-export*.html

@@ -54,6 +54,14 @@ Numérote les points dans l'ordre ([P1], [P2], …). **Règles impératives :**
   jamais un point dans une autre section, pas de liste à puces libre en dehors
   des blocs.
 - Tout point doit **citer verbatim** le passage concerné — jamais de paraphrase, jamais de fragment hors contexte.
-- Tout point doit être **ancré** : section du livrable + ID de ligne si les productions en portent (RISK-xxx, agression N, barrière B-xxx).
+- Tout point doit être **ancré** : section du livrable + **ID de ligne précis**
+  (RISK-xxx, item N du référentiel agressions/menaces, B-RISK-xxx-nn, rubrique
+  numérotée du cadrage) — JAMAIS « le tableau », « la section » ou une
+  localisation vague.
+- Si le point porte sur une **ABSENCE** (barrière manquante, rubrique vide…),
+  cite la ligne où elle devrait figurer et écris `ABSENCE :` au début de
+  l'extrait.
+- **Un point que tu ne peux pas ancrer n'est pas un point exploitable** :
+  reformule-le avec son ancrage exact ou abstiens-toi de le soulever.
 - Si tu as déjà signalé un point à une itération précédente qui persiste, réutilise **le même identifiant** ; s'il est résolu, ne le mentionne pas.
 - Les questions ouvertes pour l'humain (risques oubliés, barrières irréalistes, angles morts) suivent le même format canonique, dans la même section unique.

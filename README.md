@@ -65,8 +65,30 @@ Variables d'environnement (ou modifier `config.py`) :
 | `WEB_SEARCH_MAX_RESULTS` | `5` | Nombre de resultats web injectes par etape |
 | `SEARXNG_URL` | — | URL de l'instance SearXNG (`search.formats` avec `json` active) |
 | `TAVILY_API_KEY` | — | Cle API Tavily (si backend tavily) |
+| `HYBRID_ALPHA` | `0.5` | Poids RRF semantique vs lexical (1.0 = semantique seul, 0.0 = lexical seul) |
+| `RAG_DEDUP_ADJACENT` | `true` | Ecarter les chunks adjacents (±1) du meme fichier deja retenus — diversifie le contexte injecte |
 | `CLOUD_PRICE_INPUT` | `0` | Prix d'1M tokens d'entree en EUR (profil cloud) — active le cout estime dans les statistiques |
 | `CLOUD_PRICE_OUTPUT` | `0` | Prix d'1M tokens de sortie en EUR (profil cloud) |
+
+### Le RAG en bref (v1.3.20)
+
+Recherche hybride : embeddings `multilingual-e5-large` (ChromaDB) + **BM25
+normalise francais** (accents plies, stop-words retires) fusionnes par
+Reciprocal Rank Fusion (poids `HYBRID_ALPHA`) puis deduplication des voisins
+adjacents. Les chunks BM25 gardent leurs vraies metadonnees (fichier source).
+
+**Canal web separe du RAG** (si `WEB_SEARCH_ENABLED`) : les resultats sont
+injected dans la tache comme « Etat de l'art — NON VERIFIE » et ne sont JAMAIS
+indexes dans Chroma (l'index local reste referentiel de confiance). Pour
+consommer une info web utile de facon tracée : copiez la page en local puis
+ingerez-la via le tiroir « Documents RAG ».
+
+### En file (roadmap)
+
+- **Re-ranker local (option B)** : cross-encoder `BAAI/bge-reranker-v2-m3`
+  (~2 Go, copie locale, zero reseau) pour re-scorder les ~20 candidats avant
+  le top_k — activable via `RAG_RERANK=true` (defaut off), a tester en vitesse
+  CPU/GPU avant activation.
 
 ### Sessions sauvegardables et reprise (v1.3.17)
 

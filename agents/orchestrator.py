@@ -185,6 +185,9 @@ Pour chaque item :
 - Statut : applicable / non applicable / a confirmer
 - Justification courte et tracable
 - Lien avec le contexte du cadrage
+- Ref : le NUMERO de l'item generique evalue (1 a 42, referentiel agressions/
+  menaces generiques) — cette reference permet aux relectures de pointer une
+  ligne precise ; ne jamais livrer une ligne sans sa Ref.
 
 Appuie-toi sur le contexte documentaire (RAG) fourni pour les agressions typiques.""",
         "reviewer_task": """Relis le filtrage des agressions/menaces avec le regard du client/utilisateur final. Challenge :
@@ -285,6 +288,9 @@ Categories de barrieres a couvrir (pour l'option REDUCTION) :
 5. Barrieres de conception (choix d'architecture, principes fail-safe, diversity)
 
 Pour chaque barriere :
+- ID de barriere : B-RISK-XXX-nn (rattachee a son scenario, ex. B-RISK-003-01)
+  — reutilise par les relectures et le livrable, ne jamais livrer une barriere
+  sans ID
 - Type (prevention / detection / protection / recuperation)
 - Description de la barriere
 - Efficacite attendue
