@@ -1054,6 +1054,11 @@ async def resume_session(sdir: str) -> None:
     project = (project_input.value or "").strip() or "Sans_Nom"
     context = (context_input.value or "").strip()
     _apply_env_settings()
+    os.environ["LIVRAISON_FORCE"] = (
+        "true" if force_delivery_switch.value else "false"
+    )
+    if force_delivery_switch.value:
+        log.push("[session] LIVRAISON_FORCE : la livraison seule sera re-generee")
     await _launch_analysis(mode, project, context, resume_data=data, session_dir=sdir)
 
 
@@ -1118,6 +1123,7 @@ def build_page() -> None:
     global step_context_limit_input, context_auto_switch
     global ingest_dir, ingest_reset, ingest_btn, ingest_progress
     global project_input, context_input, run_btn, run_progress
+    global force_delivery_switch
     global tabs, sessions_container, fs_dialog, fs_md, fs_title, docs_added_md
 
     with ui.row().classes("w-full items-center justify-between"):
@@ -1245,6 +1251,14 @@ def build_page() -> None:
             ui.button("Rafraichir", icon="refresh", on_click=_refresh_sessions).props(
                 "flat dense"
             )
+        force_delivery_switch = ui.switch(
+            "Re-générer la LIVRAISON seule à la reprise (--force-delivery)",
+            value=False,
+        )
+        ui.label(
+            "À cocher si le livrable d'une session était tronqué : les étapes "
+            "validées restent conservées, la livraison seule est re-générée."
+        ).classes("text-caption text-grey")
         sessions_container = ui.column().classes("w-full")
         _refresh_sessions()
 

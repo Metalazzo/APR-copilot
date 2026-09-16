@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.23] - 2026-09-16
+
+### Ajoute — switch GUI « Re-générer la LIVRAISON seule » dans le tiroir Sessions
+
+- La reprise depuis la GUI pouvait jusqu'ici régénérer la livraison SEULEMENT
+  via la CLI (`--force-delivery`) : nouvel interrupteur dans le tiroir
+  « Sessions sauvegardees » → `LIVRAISON_FORCE` — les étapes validées restent
+  conservées, la livraison seule est re-générée (correction d'un livrable
+  tronqué sans refaire les heures de génération)
+
+### Rollback
+- Etat pre-modification : commit `1cb75be`
+
 ## [1.3.22] - 2026-09-16
 
 ### Ajoute — `python main.py sessions` (liste des sessions + reprise prete a copier)
