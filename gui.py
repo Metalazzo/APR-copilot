@@ -45,7 +45,9 @@ from session_store import delete_session, list_sessions, load_session
 # ---------------------------------------------------------------------------
 
 def _list_lmstudio_models(base_url: str) -> list[str]:
-    """Liste les identifiants de modeles exposes par le serveur LM Studio."""
+    """Liste les identifiants de modeles exposes par le serveur local
+    (endpoint OpenAI standard /v1/models : LM Studio, llama.cpp, koboldcpp,
+    Ollama, vLLM...)."""
     url = base_url.rstrip("/") + "/models"
     with urllib.request.urlopen(url, timeout=5) as resp:
         data = json.loads(resp.read().decode("utf-8"))
@@ -816,10 +818,10 @@ async def list_models():
         local_model.update()
         if ids and not local_model.value:
             local_model.value = ids[0]
-        log.push(f"[LM Studio] {len(ids)} modele(s) detects")
+        log.push(f"[Serveur local] {len(ids)} modele(s) detects")
         ui.notify(f"{len(ids)} modele(s) charges sur le serveur.", type="positive")
     except Exception as exc:
-        ui.notify(f"Serveur LM Studio injoignable : {exc}", type="negative")
+        ui.notify("Serveur local injoignable (LM Studio, llama.cpp, koboldcpp, Ollama...)", type="negative")
 
 
 async def do_ingest():
@@ -1308,7 +1310,8 @@ def build_page() -> None:
             ).props("dense")
 
         with ui.card().classes("w-full"):
-            ui.label("Modele local (LM Studio)").classes("text-subtitle1")
+            ui.label("Serveur local (compatible OpenAI : LM Studio, llama.cpp, "
+                     "koboldcpp, Ollama...)").classes("text-subtitle1")
             local_base_url = ui.input(
                 "Base URL", value=app_config.profiles.local.base_url
             ).classes("w-full")
@@ -1399,7 +1402,7 @@ def build_page() -> None:
                 format="%.0f", min=1000,
             ).props("label-always").classes("w-full")
             context_auto_switch = ui.switch(
-                "Contexte automatique (detecte via LM Studio)", value=True
+                "Contexte auto (LM Studio, llama.cpp, koboldcpp... sinon LOCAL_CONTEXT_TOKENS)", value=True
             )
 
         with ui.card().classes("w-full"):

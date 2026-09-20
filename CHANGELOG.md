@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.3.27] - 2026-09-20
+
+### Ajoute — compatibilite multi-moteurs locaux (LM Studio, llama.cpp, koboldcpp…)
+
+- **Auto-contexte multi-moteurs** : detection du contexte charge pour
+  **LM Studio** (`/api/v0/models`), **llama.cpp** (`/props` →
+  `default_generation_settings.n_ctx`) et **koboldcpp**
+  (`/api/extra/true_max_context_length`), plus **`LOCAL_CONTEXT_TOKENS`**
+  (declaration manuelle universelle, prioritaire) — sinon repli
+  `STEP_CONTEXT_LIMIT` avec message explicite
+- **Wording neutre** : GUI « Serveur local (compatible OpenAI : LM Studio,
+  llama.cpp, koboldcpp, Ollama...) », logs, notifications ; message d'echec de
+  detection qui indique comment declarer le contexte
+- **README** : section « Moteurs locaux compatibles » (commandes de demarrage,
+  ports,LOCAL_BASE_URL, tableau de contexte : auto-detecte ou declare),
+  notes tool calling (`--jinja` llama.cpp, `LLM_FUNCTION_CALLING=false`
+  koboldcpp) et thinking (jetons inertes hors LM Studio)
+- `tests/test_auto_contexte.py` : sondes LM Studio/llama.cpp/koboldcpp,
+  limite d'injection, priorite `LOCAL_CONTEXT_TOKENS` (offline)
+
+### Rollback
+- Etat pre-modification : commit `f5326be`
+
 ## [1.3.26] - 2026-09-20
 
 ### Ajoute — harnais de reprise + sauvegarde par bloc de livraison

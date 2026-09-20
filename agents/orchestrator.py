@@ -21,47 +21,110 @@ from state import AnalysisState
 # Gestion automatique du contexte du modele local (detecte via l'API LM Studio)
 # ---------------------------------------------------------------------------
 
-_AUTO_CONTEXT_CACHE: dict = {"done": False, "limit": None, "ctx": 0}
+_AUTO_CONTEXT_CACHE: dict = {"done": False, "limit": None, "ctx": 0, "engine": ""}
+
+
+def _parse_lm_studio(raw: str) -> int:
+    """Sonde LM Studio : /api/v0/models -> loaded_context_length du modele charge."""
+    data = json.loads(raw)
+    for m in data.get("data", []):
+        if m.get("state") == "loaded":
+            return int(m.get("loaded_context_length") or 0)
+    return 0
+
+
+def _parse_llama_cpp(raw: str) -> int:
+    """Sonde llama.cpp : /props -> default_generation_settings.n_ctx (ou n_ctx)."""
+    data = json.loads(raw)
+    d = data.get("default_generation_settings") or {}
+    return int(d.get("n_ctx") or 0) or int(data.get("n_ctx") or 0)
+
+
+def _parse_kobold(raw: str) -> int:
+    """Sonde koboldcpp : /api/extra/true_max_context_length -> entier brut."""
+    raw = (raw or "").strip()
+    if raw.isdigit():
+        return int(raw)
+    return int(json.loads(raw))
+
+
+# Sondes de contexte par moteur, dans l'ordre de tentative. Tout serveur non
+# reconnu (Ollama, vLLM...) sortira en repli STEP_CONTEXT_LIMIT ou declaration
+# manuelle LOCAL_CONTEXT_TOKENS.
+_PROBES = [
+    ("LM Studio", "/api/v0/models", _parse_lm_studio),
+    ("llama.cpp", "/props", _parse_llama_cpp),
+    ("koboldcpp", "/api/extra/true_max_context_length", _parse_kobold),
+]
+
+
+def _probe_context_endpoints(base: str) -> tuple[int, str]:
+    """Tente les sondes de contexte dans l'ordre. Retourne (tokens, moteur) —
+    (0, "") si tout echoue."""
+    for name, path, parser in _PROBES:
+        try:
+            req = urllib.request.Request(base + path,
+                                         headers={"User-Agent": "APR-Copilot/1.0"})
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+            ctx = parser(raw)
+            if ctx > 0:
+                return ctx, name
+        except Exception:
+            continue
+    return 0, ""
+
+
+def _injection_limit(ctx: int) -> int:
+    """Limite d'injection par etape pour un contexte charge de `ctx` tokens :
+    injectable_tokens = (ctx - LOCAL_MAX_TOKENS - overhead) * securite
+    limite_par_etape  = injectable_tokens * car_par_token / 4 etapes."""
+    out_tokens = int(os.getenv("LOCAL_MAX_TOKENS", "32768"))
+    overhead = int(os.getenv("CONTEXT_OVERHEAD_TOKENS", "15000"))
+    safety = float(os.getenv("CONTEXT_SAFETY", "0.9"))
+    chars_per_token = float(os.getenv("CONTEXT_CHARS_PER_TOKEN", "3.5"))
+    injectable = max(0, int((ctx - out_tokens - overhead) * safety))
+    return max(1000, int(injectable * chars_per_token / 4))
 
 
 def _auto_context_limit() -> Optional[int]:
-    """Detecte le contexte reellement charge du modele local (API LM Studio
-    /api/v0/models) et calcule la limite d'injection par etape :
+    """Detecte le contexte reellement charge du serveur local et calcule la
+    limite d'injection par etape.
 
-        injectable_tokens = (ctx - LOCAL_MAX_TOKENS - overhead) * securite
-        limite_par_etape  = injectable_tokens * car_par_token / 4 etapes
-
-    Retourne None si la detection echoue (serveur non-LM Studio, hors ligne,
-    cloud pur) -> repli sur STEP_CONTEXT_LIMIT. Resultat mis en cache pour
+    Compatibilite (v1.3.27) :
+      1. LOCAL_CONTEXT_TOKENS  : declaration manuelle universelle (prioritaire)
+      2. LM Studio             : /api/v0/models -> loaded_context_length
+      3. llama.cpp (llama-server) : /props -> default_generation_settings.n_ctx
+      4. koboldcpp             : /api/extra/true_max_context_length
+      sinon None -> repli STEP_CONTEXT_LIMIT. Resultat mis en cache pour
     l'analyse en cours (cache reinitialise a chaque run_full_analysis)."""
     if _AUTO_CONTEXT_CACHE["done"]:
         return _AUTO_CONTEXT_CACHE["limit"]
     limit = None
     ctx = 0
+    engine = ""
     try:
-        base = app_config.profiles.local.base_url.rstrip("/")
-        if base.endswith("/v1"):
-            base = base[:-3]
-        url = base + "/api/v0/models"
-        req = urllib.request.Request(url, headers={"User-Agent": "APR-Copilot/1.0"})
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            data = json.loads(resp.read().decode("utf-8", errors="replace"))
-        for m in data.get("data", []):
-            if m.get("state") == "loaded":
-                ctx = int(m.get("loaded_context_length") or 0)
-                break
+        declared = os.getenv("LOCAL_CONTEXT_TOKENS", "").strip()
+        if declared:
+            try:
+                ctx = int(declared)
+                engine = "declaration manuelle"
+            except ValueError:
+                print("[contexte] LOCAL_CONTEXT_TOKENS invalide : "
+                      f"{declared!r} (entier attendu)")
+        if ctx <= 0:
+            base = app_config.profiles.local.base_url.rstrip("/")
+            if base.endswith("/v1"):
+                base = base[:-3]
+            ctx, engine = _probe_context_endpoints(base)
         if ctx > 0:
-            out_tokens = int(os.getenv("LOCAL_MAX_TOKENS", "32768"))
-            overhead = int(os.getenv("CONTEXT_OVERHEAD_TOKENS", "15000"))
-            safety = float(os.getenv("CONTEXT_SAFETY", "0.9"))
-            chars_per_token = float(os.getenv("CONTEXT_CHARS_PER_TOKEN", "3.5"))
-            injectable = max(0, int((ctx - out_tokens - overhead) * safety))
-            limit = max(1000, int(injectable * chars_per_token / 4))
+            limit = _injection_limit(ctx)
     except Exception:
         limit = None
     _AUTO_CONTEXT_CACHE["done"] = True
     _AUTO_CONTEXT_CACHE["limit"] = limit
     _AUTO_CONTEXT_CACHE["ctx"] = ctx
+    _AUTO_CONTEXT_CACHE["engine"] = engine
     return limit
 
 
@@ -1389,12 +1452,16 @@ class RiskAnalysisOrchestrator:
         if os.getenv("CONTEXT_AUTO", "true").lower() in ("1", "true", "yes"):
             auto_limit = _auto_context_limit()
             ctx_loaded = _AUTO_CONTEXT_CACHE.get("ctx", 0)
+            engine = _AUTO_CONTEXT_CACHE.get("engine") or ""
             if auto_limit:
-                print(f"[contexte] auto : {ctx_loaded} tokens charges -> limite d'injection "
-                      f"{auto_limit} caracteres par etape precedente")
-                await self._emit({"type": "context_auto", "ctx": ctx_loaded, "limit": auto_limit})
+                print(f"[contexte] auto ({engine}) : {ctx_loaded} tokens charges -> "
+                      f"limite d'injection {auto_limit} caracteres par etape precedente")
+                await self._emit({"type": "context_auto", "ctx": ctx_loaded,
+                                  "limit": auto_limit, "engine": engine})
             else:
-                print("[contexte] auto : detection impossible -> limite manuelle (STEP_CONTEXT_LIMIT)")
+                print("[contexte] auto : detection impossible -> limite manuelle "
+                      "(STEP_CONTEXT_LIMIT). Declarez le contexte charge avec "
+                      "LOCAL_CONTEXT_TOKENS (ex. 131072) pour l'auto-calibrage.")
 
         for i, step in enumerate(WORKFLOW_STEPS):
             self.state.step_index = i

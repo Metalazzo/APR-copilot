@@ -70,8 +70,7 @@ traitement, points ouverts) avec la **traçabilité complète des décisions**.
 
 ## Démarrage rapide
 
-**Prérequis** : Python 3.10+ · [LM Studio](https://lmstudio.ai/) avec un modèle
-chargé (ou une clé API cloud) · les documents de votre projet.
+**Prérequis** : Python 3.10+ · un serveur local **compatible OpenAI** ([LM Studio](https://lmstudio.ai/), llama.cpp, koboldcpp, Ollama, vLLM…) avec un modèle chargé, ou une clé API cloud · les documents de votre projet.
 
 ```bash
 pip install -r requirements.txt
@@ -83,8 +82,9 @@ python main.py ingest ./sample_docs
 python gui.py
 ```
 
-Dans la GUI (tiroir **Réglages**) : profil `local`/`cloud`/`hybrid`, modèle LM
-Studio détecté en direct, lancement. Ou en CLI :
+Dans la GUI (tiroir **Réglages**) : profil `local`/`cloud`/`hybrid`, modèles du
+serveur local détectés en direct (endpoint OpenAI standard), lancement. Ou en
+CLI :
 
 ```bash
 python main.py analyze \
@@ -111,6 +111,29 @@ python main.py analyze -p "Mon_Projet" -f ./test/exemple/description_exemple.txt
 > **WSL2** : si le script tourne dans WSL et LM Studio sous Windows, viser l'IP
 > de l'hôte Windows : `LOCAL_BASE_URL="http://$(ip route show default | awk '{print $3}'):1234/v1"`
 > (ou réseau WSL en mode `mirrored`).
+
+## Moteurs locaux compatibles
+
+Tout serveur **compatible OpenAI** fonctionne via `LOCAL_BASE_URL`. La
+détection automatique du contexte chargé couvre **LM Studio / llama.cpp /
+koboldcpp** ; pour les autres, déclarez `LOCAL_CONTEXT_TOKENS` :
+
+| Moteur | Démarrage type | `LOCAL_BASE_URL` | Contexte |
+|---|---|---|---|
+| **LM Studio** | GUI (*Developer → Start Server*), port 1234 | `http://localhost:1234/v1` | auto-détecté |
+| **llama.cpp** | `llama-server -hf <modèle> --port 8080 -c 131072 --flash-attn` | `http://localhost:8080/v1` | auto-détecté (`/props`) — ⚠️ port 8080 par défaut : conflit possible avec la GUI → GUI sur `--port 8090` |
+| **koboldcpp** | `koboldcpp --model <fichier.gguf> --contextsize 131072 --port 5001` | `http://localhost:5001/v1` | auto-détecté (contexte de l'UI/CLI) |
+| **Ollama / vLLM** | `ollama serve` / `vllm serve <modèle>` | `:11434/v1` / `:8000/v1` | déclarez `LOCAL_CONTEXT_TOKENS=131072` |
+| n'importe lequel | — | — | `LOCAL_CONTEXT_TOKENS=<tokens chargés>` (prioritaire) |
+
+Notes :
+- **Clé API locale** : n'importe quelle valeur (« not-needed »)
+- **Tool calling** : désactivé par défaut (`LLM_ENGINEER_TOOLS=false`) ;
+  llama.cpp → `--jinja` si activé ; koboldcpp → `LLM_FUNCTION_CALLING=false`
+- **`LLM_REASONING`** : les jetons `<|think_*>` sont interprétés par le
+  **template côté serveur** (LM Studio + template custom) ; sur llama.cpp /
+  koboldcpp ils restent inertes — désactivez le thinking dans le moteur si le
+  modèle en a un
 
 **Performances local** : désactivez le thinking (`LLM_REASONING=off`, gain de
 plusieurs minutes/requête), activez Flash Attention + KV cache `q8_0` dans LM
