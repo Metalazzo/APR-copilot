@@ -1,0 +1,39 @@
+Systeme : Sous-station electrique de traction ferroviaire (EXEMPLE SYNTHETIQUE)
+Perimetre : Alimentation, transformation et distribution 25kV AC pour l'alimentation des catenaires
+
+Phases de vie :
+  - Exploitation normale
+  - Maintenance preventive / curative
+  - Arret d'urgence
+  - Remise en service
+
+Fonctions principales :
+  - Alimenter la catenaire en 25kV AC monophase
+  - Transformer la tension 63kV/90kV en 25kV
+  - Proteger contre les surcharges et courts-circuits (disjoncteurs, protections differentielles)
+  - Permettre l'isolement de sections de catenaire pour maintenance (sectionneurs)
+  - Surveiller les parametres electriques (tension, courant, puissance, desequilibre)
+  - Communiquer avec le poste de commande centralise (SCADA, IEC 60870-5-104)
+  - Assurer la mise a la terre de securite
+
+Interfaces :
+  - Reseau electrique national (63kV ou 90kV triphase) via poste de livraison
+  - Catenaires (25kV AC monophase) — departs lignes
+  - Systeme de teleconduite SCADA
+  - Voie ferree et installations de quai
+  - Reseau de terre general
+  - Alimentations auxiliaires (BT 230/400V)
+  - Detection incendie
+
+Utilisateurs :
+  - Agents de conduite (exploitation, teleconduite)
+  - Mainteneurs habilites electriques (HTA/HTB)
+  - Agents d'astreinte (depannages)
+
+Environnement :
+  - Exterieur non climatise, -20C a +45C, pluie, neige, poussiere, givre
+  - CEM ferroviaire, vibrations de voie, corona HTA
+
+Hypotheses structurantes :
+  - Alimentation biphasique 25kV conformement au referentiel reseau
+  - Exploitation en teleconduite avec agents d'astreinte locaux

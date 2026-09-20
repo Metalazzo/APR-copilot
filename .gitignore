@@ -9,3 +9,5 @@ models/
 .venv/
 venv/
 markdown-export*.html
+test/batterie/
+test/references/*.pdf
