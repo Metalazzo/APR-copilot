@@ -58,6 +58,46 @@ async def sessions_command(args):
         print()
 
 
+async def export_xlsx_command(args):
+    """Export Excel : fichier .md d'analyse OU dossier de session."""
+    from export_utils import export_xlsx, markdown_tables
+
+    src = Path(args.source)
+    out = Path(args.output) if args.output else None
+    sheets = []
+    if src.is_dir():
+        state_file = src / "state.json"
+        if not state_file.exists():
+            print(f"ERREUR: Aucun state.json dans {src}")
+            return
+        import json
+        data = json.loads(state_file.read_text(encoding="utf-8"))
+        outputs = data.get("outputs", {}) or data.get("steps", {})
+        liv = outputs.get("livraison", "")
+        if liv:
+            sheets.extend((t, c) for t, c in markdown_tables(liv))
+        from agents.orchestrator import WORKFLOW_STEPS
+        for step in WORKFLOW_STEPS:
+            txt = outputs.get(step["id"], "")
+            if not txt or step["id"] == "livraison":
+                continue
+            name = step["name"].split(" - ", 1)[-1]
+            for t, cells in markdown_tables(txt):
+                sheets.append((f"{name} · {t}" if t else name, cells))
+        out = out or (src.parent / f"{src.name}_analyse.xlsx")
+    elif src.suffix.lower() == ".md":
+        sheets = markdown_tables(src.read_text(encoding="utf-8"))
+        out = out or src.with_suffix(".xlsx")
+    else:
+        print("ERREUR: Source attendue = fichier .md ou dossier de session.")
+        return
+    if not sheets:
+        print("ERREUR: Aucun tableau detecte dans la source.")
+        return
+    path = export_xlsx(sheets, out)
+    print(f"Export Excel : {path} ({len(sheets)} onglet(s))")
+
+
 async def search_command(args):
     from rag.retriever import retrieve, format_retrieved_context
 
@@ -245,6 +285,16 @@ def main():
         "sessions", help="Lister les sessions sauvegardees (pour --resume)"
     )
 
+    export_parser = subparsers.add_parser(
+        "export-xlsx",
+        help="Exporter les tableaux d'une analyse en Excel (.xlsx)",
+    )
+    export_parser.add_argument(
+        "source",
+        help="Fichier .md d'analyse OU dossier de session (state.json)",
+    )
+    export_parser.add_argument("--output", default=None, help="Chemin du .xlsx de sortie")
+
     args = parser.parse_args()
 
     if args.command == "ingest":
@@ -253,6 +303,8 @@ def main():
         asyncio.run(search_command(args))
     elif args.command == "sessions":
         asyncio.run(sessions_command(args))
+    elif args.command == "export-xlsx":
+        asyncio.run(export_xlsx_command(args))
     elif args.command == "analyze":
         asyncio.run(analyze_command(args))
     else:

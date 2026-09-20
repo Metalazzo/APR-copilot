@@ -59,4 +59,13 @@ def save_analysis_outputs(
         ),
         encoding="utf-8",
     )
+
+    # Vue Excel des tableaux (v1.3.29) : en plus du .md (maitre) et du .json
+    try:
+        from export_utils import save_xlsx_from_outputs
+        xlsx_path = save_xlsx_from_outputs(outputs, project, output_dir)
+        print(f"[export] vue Excel : {xlsx_path}")
+    except Exception as exc:
+        print(f"[export] Excel indisponible ({exc}) — le .md et le .json restent valides")
+
     return output_path, json_path

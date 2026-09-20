@@ -1225,6 +1225,11 @@ def build_page() -> None:
                         icon="rate_review",
                         on_click=lambda s=step["id"]: _open_step_tab(s),
                     ).props("flat dense")
+                    if step["id"] == "livraison":
+                        ui.button(
+                            "Exporter Excel", icon="grid_on",
+                            on_click=_export_livraison_xlsx,
+                        ).props("flat dense")
                 decision_rows[step["id"]] = {
                     "feedback": feedback_input, "btn_continue": b_c,
                     "btn_quit": b_q, "btn_feedback": b_f, "status": status,
@@ -1444,6 +1449,26 @@ def _show_fullscreen(step_id: str) -> None:
     fs_title.set_text(f"{card['name']} — Production")
     fs_md.set_content(card.get("production_text") or "*Production non generee*")
     fs_dialog.open()
+
+
+def _export_livraison_xlsx() -> None:
+    """Bouton GUI : classeur Excel du livrable + des productions d'etapes."""
+    outputs = {
+        sid: (card.get("production_text") or "")
+        for sid, card in step_cards.items()
+    }
+    if not outputs.get("livraison"):
+        _safe_notify("Aucune livraison a exporter (generation non terminee).",
+                     type_="warning")
+        return
+    try:
+        from export_utils import save_xlsx_from_outputs
+        project = (project_input.value or "").strip() or "Sans_Nom"
+        path = save_xlsx_from_outputs(outputs, project, app_config.output_dir)
+        log.push(f">> Export Excel : {path}")
+        _safe_notify(f"Classeur Excel produit : {path}", type_="positive")
+    except Exception as exc:
+        _safe_notify(f"Export Excel impossible : {exc}", type_="negative")
 
 
 build_page()

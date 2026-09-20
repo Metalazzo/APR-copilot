@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.3.29] - 2026-09-21
+
+### Ajoute — export Excel des tableaux d'analyse (vues relisibles)
+
+- **`export_utils.py`** : parseur de tableaux markdown robuste (gras dans les
+  en-tetes, separateurs `:---`, cellules `<br>` → retour a la ligne dans la
+  cellule, lignes de continuation fusionnees, blocs sans separateur ignores,
+  `\|` echappes) + classeur **openpyxl** stylé : en-tete bleu en gras, filtres
+  automatiques, volets figés, largeurs de colonnes, retour a la ligne,
+  **coloration** des niveaux de risque/statut (critique/élevé/moyen/faible,
+  OK/KO)
+- **Un onglet par tableau** : d'abord le LIVRABLE (Bloc 1 a 5), puis les
+  PRODUCTIONS d'etapes (Cadrage, Filtrage, Scenarios, Barrieres) — noms d'onglet
+  derives des en-tetes du document, sanitises (31 car., doublons suffixés)
+- **3 declenchements** :
+  - automatique a la fin d'analyse : `<projet>_analyse.xlsx` a cote du `.md`
+    (maitre) et du `.json`
+  - GUI : bouton « Exporter Excel » dans l'onglet Livraison
+  - CLI : `python main.py export-xlsx <fichier.md | dossier de session>` —
+    retro-export des analyses existantes
+- **Demo sur session reelle** (`20260911-040700`, livraison 272k car.) :
+  **127 onglets** generes et verifiables (0 Corrections structurantes, RACI,
+  tableaux APR, plan de traitement, points ouverts...)
+- `openpyxl` ajoute a requirements.txt (deja present via chromadb)
+- Rollback : commit `a7dd996`
+
 ## [1.3.28] - 2026-09-20
 
 ### Ajoute — préfixes e5 + evaluation mesuree du RAG (P2.0)

@@ -234,6 +234,18 @@ qualifié. Les référentiels complets (AFNOR, IEC, CLUSIF…) sont payants et
 doivent être apportés par vos soins dans le RAG. Aucune garantie d'exhaustivité
 ou d'exactitude des générations LLM.
 
+## Sorties d'analyse
+
+| Fichier | Contenu |
+|---|---|
+| `output/<projet>_analyse.md` | Livrable complet **(document maître)** — texte, justifications, tableaux |
+| `output/<projet>_analyse.xlsx` | **Vue Excel des tableaux** — un onglet par tableau (livrable + productions d'étapes), en-têtes stylés, filtres, coloration des niveaux |
+| `output/<projet>_analyse.json` | Audit : toutes les productions par étape |
+| `output/sessions/<id>/` | Session reprenable + `stats.md`/`stats.json` |
+
+Export rétro pour une analyse existante :
+`python main.py export-xlsx output/sessions/<id>` (ou un fichier `.md`).
+
 ## Roadmap
 
 - Re-ranker local `BAAI/bge-reranker-v2-m3` (`RAG_RERANK`, ~2 Go, zéro réseau)
