@@ -137,8 +137,15 @@ Notes :
 
 **Performances local** : désactivez le thinking (`LLM_REASONING=off`, gain de
 plusieurs minutes/requête), activez Flash Attention + KV cache `q8_0` dans LM
-Studio, calibrez `LLM_TIMEOUT` avec les stats réelles. Un MoE (ex. Qwen3.8-27B
-GSQ-RCO quantizé) divise le temps de génération pour un contexte identique.
+Studio, calibrez `LLM_TIMEOUT` avec les stats réelles. Deux leviers de vitesse
+indépendants :
+
+- **La quantification maline** — un Qwen3.8-27B (dense) en GSQ-RCO IQ3_S
+  (quantification mixte par tenseur, « task-lossless ») pèse ~30 % de moins
+  qu'un Q4_K_M : prefill plus rapide et VRAM libérée pour le contexte
+- **Un modèle MoE** (mixture-of-experts, ~3B de paramètres actifs par token :
+  Ornith-1.5-35B-A3B, Qwen3.6-35B-A3B) divise le temps de génération à mémoire
+  égale — idéal pour la Secrétaire, dont le travail est surtout de restitution
 
 ## Configuration
 
