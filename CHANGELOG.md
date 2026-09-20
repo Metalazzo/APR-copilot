@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.3.28] - 2026-09-20
+
+### Ajoute — préfixes e5 + evaluation mesuree du RAG (P2.0)
+
+- **Prefixes e5 conformes au contrat du modele** (`query: `/`passage: `) :
+  ingestion (`rag/vector_store.py`) et requetes (`rag/retriever.py`) ;
+  auto-detection (`e5` dans le nom du modele) + override
+  `EMBEDDING_PREFIXES=auto|e5|none`
+- **Signature d'embeddings** (`chroma_db/.embedding_sig`) : ecrite a
+  l'ingestion (modele + prefixes) ; le retrieve avertit si l'index ne
+  correspond pas a la politique courante (mismatch silencieux sinon)
+- **`tests/eval_rag.py`** : evaluation offline du pipeline complet sur 12
+  requetes metier (recall@1/@3/@8 + MRR) — jeu de requete-vérité editable
+- **Re-indexation** sample_docs + test (10 + 528 chunks, prefixés)
+- **Mesure** (baseline vs post) : recall@3 67% → 92%, recall@8 67% → 100%,
+  MRR 0.625 → 0.688 — les gains @3/@8 viennent surtout de l'indexation des
+  documents generiques (sample_docs n'etait JAMAIS indexé !) ; le top-1 sur
+  les 8 requêtes CLUSIF/batterie reste comparable (verité stricte, plusieurs
+  sources legitimes). **Re-ranker (P2.1) reporté** — le residuel mesurable ne
+  justifie pas 2 Go pour l'instant
+- **Rollback facile** : backup de l'index avant ré-indexation
+  (`output/index_backup/chroma_db_20260920-225608`) + `EMBEDDING_PREFIXES=none`
+  ; git rollback `f5326be`
+
 ## [1.3.27] - 2026-09-20
 
 ### Ajoute — compatibilite multi-moteurs locaux (LM Studio, llama.cpp, koboldcpp…)

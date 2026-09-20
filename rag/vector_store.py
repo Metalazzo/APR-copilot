@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -150,6 +151,80 @@ def get_collection() -> chromadb.Collection:
     return _collection
 
 
+def _prefix_policy() -> tuple[str, str]:
+    """Prefixes e5 a appliquer aux textes avant encodage : ("query: ", "passage: ").
+
+    Mode (env EMBEDDING_PREFIXES) :
+      - auto (defaut) : prefixes e5 si le nom du modele en contient un
+      - e5            : prefixes forces
+      - none          : aucun prefixe (modèle non-e5 ou index legacy)
+
+    IMPORTANT : changer la politique exige une RE-INDEXATION (les embeddings
+    des passages changent) — la signature `.embedding_sig` ecrite a l'ingestion
+    permet au retrieve de detecter l'incoherence."""
+    mode = os.getenv("EMBEDDING_PREFIXES", "auto").strip().lower()
+    if mode == "none":
+        return "", ""
+    name = (app_config.rag.embedding_model or "").lower()
+    if mode == "e5" or (mode == "auto" and "e5" in name):
+        return "query: ", "passage: "
+    return "", ""
+
+
+def get_prefixes() -> tuple[str, str]:
+    """Prefixes courants (requête, passage) — importé par rag.retriever."""
+    return _prefix_policy()
+
+
+_EMBEDDING_SIG_NAME = ".embedding_sig"
+
+
+def write_embedding_signature() -> None:
+    """Signature de coherence : modele + prefixes utilises a l'indexation.
+    Le retrieve avertit si l'index ne correspond pas a la politique courante."""
+    import time
+
+    try:
+        q, p = _prefix_policy()
+        sig = {
+            "model": app_config.rag.embedding_model,
+            "prefixes": "e5" if q else "none",
+            "updated": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        sig_path = Path(app_config.rag.persist_directory) / _EMBEDDING_SIG_NAME
+        sig_path.write_text(json.dumps(sig, ensure_ascii=False), encoding="utf-8")
+    except Exception as exc:
+        print(f"[embeddings] signature impossible : {exc}")
+
+
+_SIG_CHECK_DONE: dict = {"done": False}
+
+
+def check_embedding_signature() -> None:
+    """Avertit (une fois par process) si l'index ne correspond pas aux
+    prefixes courants — un mismatch degrades la recherche silencieusement."""
+    if _SIG_CHECK_DONE["done"]:
+        return
+    _SIG_CHECK_DONE["done"] = True
+    try:
+        sig_path = Path(app_config.rag.persist_directory) / _EMBEDDING_SIG_NAME
+        if not sig_path.exists():
+            print("[embeddings] ATTENTION : index sans signature — si les "
+                  "prefixes e5 viennent d'etre appliques, re-indexez "
+                  "(python main.py ingest <dossier> --reset).")
+            return
+        sig = json.loads(sig_path.read_text(encoding="utf-8"))
+        q, _ = _prefix_policy()
+        current = "e5" if q else "none"
+        if sig.get("prefixes") != current:
+            print(f"[embeddings] ATTENTION : index construit avec prefixes="
+                  f"{sig.get('prefixes')!r} mais la politique courante est "
+                  f"{current!r} — RE-INDEXEZ (python main.py ingest <dossier> "
+                  f"--reset).")
+    except Exception as exc:
+        print(f"[embeddings] lecture de la signature impossible : {exc}")
+
+
 def ingest_documents(directory: Path, reset: bool = False) -> IngestReport:
     """Indexe recursivement les documents supportes du repertoire.
 
@@ -160,6 +235,7 @@ def ingest_documents(directory: Path, reset: bool = False) -> IngestReport:
     report = IngestReport()
     model = get_embedding_model()
     collection = get_collection()
+    _, passage_prefix = _prefix_policy()
 
     if reset:
         client = get_client()
@@ -167,6 +243,10 @@ def ingest_documents(directory: Path, reset: bool = False) -> IngestReport:
         global _collection
         _collection = None
         collection = get_collection()
+        # purge la signature : le nouvel index porte la politique courante
+        sig_path = Path(app_config.rag.persist_directory) / _EMBEDDING_SIG_NAME
+        if sig_path.exists():
+            sig_path.unlink()
 
     directory = Path(directory)
     text_paths = [
@@ -210,7 +290,7 @@ def ingest_documents(directory: Path, reset: bool = False) -> IngestReport:
                 {"source": str(file_path), "filename": file_path.name, "chunk_index": i}
                 for i in range(len(chunks))
             ]
-            embeddings = model.encode(chunks).tolist()
+            embeddings = model.encode([f"{passage_prefix}{c}" for c in chunks]).tolist()
 
             # upsert (et non add) : re-ingestion sans --reset sans erreur d'ID duplique
             collection.upsert(
@@ -228,6 +308,8 @@ def ingest_documents(directory: Path, reset: bool = False) -> IngestReport:
         report.files_ok += 1
         report.chunks += len(chunks)
 
+    # Signature : modèle + prefixes utilisés pour CE nouvel index
+    write_embedding_signature()
     return report
 
 

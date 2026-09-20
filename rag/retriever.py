@@ -129,9 +129,13 @@ def _dedup_adjacent(chunks: list[DocumentChunk], top_k: int) -> list[DocumentChu
 
 
 def _semantic_search(query: str, top_k: int) -> list[DocumentChunk]:
+    from rag.vector_store import check_embedding_signature, get_prefixes
+
+    check_embedding_signature()
+    q_prefix, _ = get_prefixes()
     model = get_embedding_model()
     collection = get_collection()
-    query_embedding = model.encode([query]).tolist()
+    query_embedding = model.encode([f"{q_prefix}{query}"]).tolist()
 
     results = collection.query(
         query_embeddings=query_embedding,
