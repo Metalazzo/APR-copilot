@@ -115,6 +115,10 @@ async def analyze_command(args):
         os.environ["LIVRAISON_FORCE"] = "true"
         print("LIVRAISON_FORCE : la livraison sera re-generee seule a la reprise.")
 
+    if getattr(args, "output_dir", None):
+        # Bug M9 : le flag --output-dir etait accepte mais jamais lu
+        app_config.output_dir = Path(args.output_dir)
+
     print_banner()
     print(f"Affectation des modeles : {mode}")
     print(f"Modele cloud : {app_config.profiles.cloud.model}")

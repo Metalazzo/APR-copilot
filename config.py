@@ -63,7 +63,7 @@ class ModelProfiles:
 class AppConfig:
     profiles: ModelProfiles = field(default_factory=ModelProfiles)
     rag: RAGConfig = field(default_factory=RAGConfig)
-    input_dir: Path = PROJECT_ROOT / "test" / "sample_docs"
+    input_dir: Path = PROJECT_ROOT / "sample_docs"
     output_dir: Path = PROJECT_ROOT / "output"
 
 

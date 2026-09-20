@@ -330,7 +330,11 @@ def _anchor_labels(pt: dict, production_text: str | None) -> list[tuple[str, str
     no_anchor, extrait_missing = _anchor_flags(pt, production_text)
     labels = []
     if no_anchor:
-        labels.append(("⚠ non ancré (ni localisation ni extrait — raté du relecteur)", "brown"))
+        # Bug M8 : si le point vient du repli heuristique (pas de bloc
+        # canonique), l'absence d'ancrage vient du FORMAT, pas du relecteur
+        kind = ("point non structuré (le relecteur n'a pas suivi le format)"
+                if not pt.get("id") else "ni localisation ni extrait — raté du relecteur")
+        labels.append((f"⚠ non ancré ({kind})", "brown"))
     elif extrait_missing:
         labels.append(("⚠ extrait introuvable dans la production — juger avec prudence", "deep-orange"))
     return labels
@@ -541,7 +545,11 @@ def _open_step_tab(step_id: str) -> None:
     if tabs is not None and step_tabs.get(step_id) is not None:
         tabs.set_value(step_tabs[step_id])
     _render_step_points(step_id, interactive=False)
-    _set_decision_bar(step_id, False)
+    # Bug I1 : ne jamais masquer la barre de decision d'une etape qui a un
+    # checkpoint EN ATTENTE (un seul clic de consultation figeait sinon la
+    # qualification sans aucun moyen de repondre).
+    if pending_checkpoint.get("step_id") != step_id:
+        _set_decision_bar(step_id, False)
 
 
 async def gui_checkpoint(
@@ -748,6 +756,30 @@ async def on_progress(event: dict) -> None:
             card["badge"].set_text(f"Livraison bloc {event.get('bloc', '')}…")
             card["badge"].props("color=teal")
         log.push(f"[livraison] {event.get('titre', '')} ({event.get('bloc', '')})")
+    elif etype == "delivery_bloc_continuation":
+        card = step_cards.get(event.get("step_id", ""))
+        if card:
+            card["badge"].set_text(
+                f"Continuation bloc {event.get('bloc', '')}…"
+            )
+            card["badge"].props("color=orange")
+        log.push(f"[livraison] sortie coupee -> continuation "
+                 f"{event.get('attempt', '?')} : {event.get('titre', '')}")
+    elif etype == "livrable_incomplet":
+        missing = event.get("missing") or []
+        parts = []
+        if event.get("bloc"):
+            parts.append(f"{event['bloc']}")
+        if missing:
+            parts.extend(missing)
+        if event.get("truncated"):
+            parts.append("derniere ligne tronquée")
+        msg = "⚠️ Livrable incomplet : " + " — ".join(parts)
+        log.push(msg)
+        _safe_notify(msg, type_="warning")
+        if card:
+            card["badge"].set_text("⚠ livrable incomplet")
+            card["badge"].props("color=negative")
     elif etype == "step_stats":
         ph = event.get("phase") or {}
         tt = event.get("totals") or {}
@@ -1133,7 +1165,7 @@ def build_page() -> None:
                 "Analyse Preliminaire de Risque multi-agents · 1 onglet par etape · "
                 "qualification inline"
             ).classes("text-subtitle2 text-grey")
-        ui.badge("APR Copilot v1.3.18", color="blue-grey")
+        ui.badge("APR Copilot v1.3.25", color="blue-grey")
 
     # ------------------------- Onglets par etape -------------------------
     step_cards.clear()

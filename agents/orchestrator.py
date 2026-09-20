@@ -433,6 +433,11 @@ class OrchestratorState:
     outputs: dict = field(default_factory=dict)
     reviews: dict = field(default_factory=dict)
     human_validations: dict = field(default_factory=dict)
+    # Statut de validation PAR ETAPE (v1.3.25) : {step_id: bool} — True apres
+    # CONTINUER / SANS CORRECTION, False si un feedback attend une
+    # re-generation. Distingue la validation du simple enregistrement de
+    # decision (human_validations) : c'est LE champ de la reprise.
+    validated: dict = field(default_factory=dict)
     # Qualifications humaines PAR POINT de relecture, persistant entre les
     # iterations d'une meme etape : {step_id: {point_id: {decision, text,
     # detail, iteration}}}. Les points deja decides ne sont pas re-soumis a
@@ -459,6 +464,7 @@ class OrchestratorState:
             "outputs": dict(self.outputs),
             "reviews": dict(self.reviews),
             "human_validations": dict(self.human_validations),
+            "validated": dict(self.validated),
             "point_decisions": self.point_decisions,
             "call_stats": list(self.call_stats),
             "models_used": dict(self.models_used),
@@ -480,6 +486,24 @@ class OrchestratorState:
         st.outputs = dict(data.get("outputs", {}) or {})
         st.reviews = dict(data.get("reviews", {}) or {})
         st.human_validations = dict(data.get("human_validations", {}) or {})
+        st.validated = dict(data.get("validated", {}) or {})
+        if not data.get("validated"):
+            # Compat sessions v1.3.17-21 : derivation depuis human_validations.
+            # Un feedback brut ("POINTS DE CONTROLE HUMAIN (version Vn)…") = une
+            # correction demandee NON integree -> l'etape n'est PAS validee
+            # (le bug C1 de la v1.3.25-review est corrigé ici aussi).
+            for sid, v in st.human_validations.items():
+                if not v:
+                    continue
+                vs = str(v)
+                if vs == "quit":
+                    st.validated[sid] = False
+                elif vs == "validated" or vs.lstrip().startswith(
+                    ("SANS CORRECTION", "## FEEDBACK HUMAIN")
+                ):
+                    st.validated[sid] = True
+                else:
+                    st.validated[sid] = False
         st.point_decisions = dict(data.get("point_decisions", {}) or {})
         st.call_stats = list(data.get("call_stats", []) or [])
         st.models_used = dict(data.get("models_used", {}) or {})
@@ -620,10 +644,17 @@ class RiskAnalysisOrchestrator:
             parts.append(f"### {done_step['name']}\n{trimmed}")
         if truncated:
             detail = ", ".join(f"{sid} (-{lost} car.)" for sid, lost in truncated)
+            auto_active = os.getenv("CONTEXT_AUTO", "true").lower() in ("1", "true", "yes") \
+                and _AUTO_CONTEXT_CACHE.get("limit")
+            remedie = (
+                f"augmentez le contexte charge dans LM Studio (auto : {limit} car. "
+                f"calculés depuis le contexte charge)"
+                if auto_active and _AUTO_CONTEXT_CACHE.get("ctx")
+                else f"augmentez STEP_CONTEXT_LIMIT (actuellement {limit})"
+            )
             msg = (
                 f"[contexte] productions tronquees : {detail} — "
-                f"des points risquent de sauter. Augmentez STEP_CONTEXT_LIMIT "
-                f"(actuellement {limit})."
+                f"des points risquent de sauter. {remedie}."
             )
             print(msg)
             await self._emit({
@@ -815,16 +846,28 @@ class RiskAnalysisOrchestrator:
         previous_production: str = "",
         human_feedback: str = "",
     ) -> str:
-        """Tache focalisee pour UN bloc de la livraison : sources dediees + regles."""
+        """Tache focalisee pour UN bloc de la livraison : sources dediees + regles.
+        Les troncatures de sections sont signalees (marqueur + attribut
+        _bloc_truncations pour log/GUI) : le bloc ne peut pas retranscrire ce
+        qu'il n'a pas vu."""
         limit = self._step_context_limit()
         parts = [f"## Tache\n{bloc['consigne']}"]
+        self._bloc_truncations = []
 
         for sid in bloc["sources"]:
             out = self.state.outputs.get(sid)
             if out:
-                parts.append(
-                    f"## Section source : {self._step_name(sid)}\n{out[:limit]}"
-                )
+                if len(out) > limit:
+                    self._bloc_truncations.append((sid, len(out) - limit))
+                    parts.append(
+                        f"## Section source : {self._step_name(sid)} "
+                        f"(TRONQUEE : {len(out) - limit} caracteres absents)\n"
+                        f"{out[:limit]}\n[... tronque ...]"
+                    )
+                else:
+                    parts.append(
+                        f"## Section source : {self._step_name(sid)}\n{out[:limit]}"
+                    )
 
         decisions = [
             f"### Etape '{sid}'\n{txt}"
@@ -911,6 +954,21 @@ class RiskAnalysisOrchestrator:
         un appel de CONTINUATION complete la generation (max 2)."""
         outputs = []
         total = len(LIVRAISON_BLOCS)
+        limit = self._step_context_limit()
+        if limit < 5000:
+            # Limite degeneree (contexte charge trop petit ou repli manuel) :
+            # les sections sources seraient coupees a quelques centaines de
+            # caracteres — la livraison ne peut pas retranscrire ce qu'elle
+            # ne voit pas (bug I4).
+            msg = (f"[livrable] ATTENTION : limite d'injection critique "
+                   f"({limit} car. par etape source) — augmentez le contexte "
+                   f"charge dans LM Studio ou STEP_CONTEXT_LIMIT.")
+            print(msg)
+            await self._emit({
+                "type": "context_truncated",
+                "detail": f"limite d'injection critique pour la livraison : {limit} car.",
+                "limit": limit,
+            })
         for i, bloc in enumerate(LIVRAISON_BLOCS, 1):
             await self._emit({
                 "type": "delivery_bloc",
@@ -919,6 +977,17 @@ class RiskAnalysisOrchestrator:
                 "titre": bloc["titre"],
             })
             task = self._livraison_bloc_task(bloc, previous_production, human_feedback)
+            if self._bloc_truncations:
+                detail = ", ".join(
+                    f"{self._step_name(sid)} (-{lost} car.)" for sid, lost in self._bloc_truncations
+                )
+                print(f"[livrable] ATTENTION : sources tronquees pour {bloc['titre']} : {detail}")
+                await self._emit({
+                    "type": "context_truncated",
+                    "step_id": step["id"],
+                    "detail": f"{bloc['titre']} : {detail}",
+                    "limit": limit,
+                })
             out = await self._ask_agent(
                 self.secretary, task,
                 stat_step=step["id"], stat_agent="secretary",
@@ -957,6 +1026,22 @@ class RiskAnalysisOrchestrator:
                     stat_iteration=iteration,
                 )
                 out = self._merge_continuation(out, cont)
+            if self._looks_truncated(out):
+                # Encore tronque apres 2 continuations : la coupure est desormais
+                # en milieu de document, invisible pour le controle final
+                print(f"[livrable] ATTENTION : {bloc['titre']} encore tronque "
+                      f"apres {attempts} continuation(s)")
+                await self._emit({
+                    "type": "livrable_incomplet",
+                    "bloc": bloc["titre"],
+                    "truncated": True,
+                })
+            if len(out.strip()) < 50:
+                print(f"[livrable] ATTENTION : {bloc['titre']} quasi vide")
+                await self._emit({
+                    "type": "livrable_incomplet",
+                    "bloc": bloc["titre"],
+                })
             outputs.append(f"## {bloc['titre']}\n\n{out.strip()}")
             print(f"[livraison] {bloc['titre']} : {len(out)} caracteres ({i}/{total})")
 
@@ -1224,8 +1309,6 @@ class RiskAnalysisOrchestrator:
     async def run_full_analysis(
         self, initial_context: str = "", resume_state: Optional[dict] = None
     ) -> dict:
-        all_outputs = {}
-
         # Session (v1.3.17) : reprise d'un etat existant ou nouveau dossier.
         if resume_state:
             self.state = OrchestratorState.from_dict(resume_state)
@@ -1233,10 +1316,18 @@ class RiskAnalysisOrchestrator:
         elif not self.session_dir:
             self.session_dir = str(new_session_dir())
 
+        # Les etapes sautees (validées) restent dans all_outputs : le JSON
+        # d'audit et save_analysis_outputs gardent TOUTE la session (bug I2).
+        all_outputs = dict(self.state.outputs) if resume_state else {}
+
         validated_ids: set = set()
         if resume_state:
-            for sid, v in self.state.human_validations.items():
-                if v and v != "quit":
+            # La validation se lit dans state.validated (True apres
+            # CONTINUER/SANS CORRECTION) — un feedback "a corriger" en attente
+            # n'est PAS une validation (bug C1 : il etait silencieusement
+            # saute a la reprise).
+            for sid, ok in (self.state.validated or {}).items():
+                if ok:
                     validated_ids.add(sid)
             if self.state.outputs.get("livraison") and os.getenv(
                 "LIVRAISON_FORCE", ""
@@ -1396,10 +1487,12 @@ class RiskAnalysisOrchestrator:
                     self.state.human_validations[step["id"]] = (
                         self._feedback_section(feedbacks) if feedbacks else "validated"
                     )
+                    self.state.validated[step["id"]] = True
                     print(">> Etape validee.")
                     break
                 if answer == "QUITTER":
                     self.state.human_validations[step["id"]] = "quit"
+                    self.state.validated[step["id"]] = False
                     print(">> Analyse interrompue.")
                     interrupted = True
                     break
@@ -1412,12 +1505,13 @@ class RiskAnalysisOrchestrator:
                     self.state.human_validations[step["id"]] = (
                         self._feedback_section(feedbacks + [feedback])
                     )
+                    self.state.validated[step["id"]] = True
                     print(">> Etape validee (points de la relecture qualifies, sans correction).")
                     break
 
                 self._record_point_decisions(step["id"], feedback, iteration)
+                self.state.validated[step["id"]] = False  # feedback en attente d'integration
                 feedbacks.append(feedback)
-                self.state.human_validations[step["id"]] = feedback
                 iteration += 1
                 print(">> Feedback enregistre, nouvelle iteration...")
                 await self._save_session()

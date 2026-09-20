@@ -25,7 +25,7 @@ Tableau structuré avec colonnes requises, incluant option de traitement (REDUCT
 Pour chaque risque non réduit à un niveau acceptable : option de traitement, mesures et conditions d'exécution, décision requise (qui accepte — propriétaire des risques), conditions d'acceptation éventuelles (durée, en attendant une action), suivi prévu, et **colonne « Décision humaine » (OK/KO + détail)** d'après les décisions enregistrées, si fournies
 
 ### Bloc 5 — Points ouverts pour validation humaine
-Liste priorisée : ambiguïtés, hypothèses critiques, éléments manquants, décisions attendues — avec **« Décision humaine » (OK/KO + détail)** par point, d'après les décisions enregistrées, si fournies
+Tableau COMPACT impose : `| Point | Ref (ancre : ID de scenario/item/barriere) | Decision humaine (OK/KO + detail) | Statut |` — UNE ligne courte par point, doublons strictement identiques regroupes, chaque ligne COMPLETE et fermee par `|`. La Decision humaine vient des decisions enregistrees, si fournies.
 
 ## Formats supportés
 - **Markdown** (tableaux, titres, listes) — défaut
@@ -39,4 +39,7 @@ Liste priorisée : ambiguïtés, hypothèses critiques, éléments manquants, d�
 - Tu appliques le style rédactionnel : professionnel, sobre, technique, structuré.
 
 ## Format de réponse
-Réponds avec le document formaté directement, précédé d'un court en-tête indiquant le format généré et les éventuelles anomalies de structure détectées.
+Réponds avec le contenu du bloc demandé SANS préambule, sans commentaire méta
+et sans mention du processus : chaque tâche te demande un bloc unique du
+livrable (Bloc 1 à 5) — livre exactement ce bloc, rien d'autre. Toute ligne de
+tableau doit être complète et fermée par `|`.
