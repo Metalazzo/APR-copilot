@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.3.30] - 2026-09-21
+
+### Modifie — export Excel : 1 onglet PAR ETAPE (relecture confortable)
+
+Suite au retour utilisateur : les 127 onglets (un par tableau) rendaient la
+relecture difficile — **5 onglets** seulement maintenant, un par etape :
+- `Etape 1 - Cadrage` (196 lignes) · `Etape 2 - Filtrage` (249) ·
+  `Etape 3 - Scenarios` (61) · `Etape 4 - Barrieres` (191) ·
+  `Etape 5 - Livraison` (615) — **verifié sur la session reelle
+  20260911-040700**
+- Dans chaque onglet, les tableaux de l'etape sont **empiles** : titre de
+  section en gras, en-tete stylé, ligne vide de separation
+- Tableaux multicolones cote a cote supprimes : les 18 colonnes de l'APR sont
+  dans l'onglet Livraison, les productions sources dans leur onglet
+- Mis a jour : parseur identique (gras, `<br>`, continuations, `\|` echappes),
+  coloration niveaux/statut, garde-fous (31 car. par nom d'onglet, doublons)
+- Tests reecrits pour la structure empilee
+- Rollback : commit `a7dd996`
+
 ## [1.3.29] - 2026-09-21
 
 ### Ajoute — export Excel des tableaux d'analyse (vues relisibles)

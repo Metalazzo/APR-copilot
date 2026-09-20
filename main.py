@@ -73,20 +73,18 @@ async def export_xlsx_command(args):
         import json
         data = json.loads(state_file.read_text(encoding="utf-8"))
         outputs = data.get("outputs", {}) or data.get("steps", {})
-        liv = outputs.get("livraison", "")
-        if liv:
-            sheets.extend((t, c) for t, c in markdown_tables(liv))
         from agents.orchestrator import WORKFLOW_STEPS
         for step in WORKFLOW_STEPS:
             txt = outputs.get(step["id"], "")
-            if not txt or step["id"] == "livraison":
+            if not txt:
                 continue
-            name = step["name"].split(" - ", 1)[-1]
-            for t, cells in markdown_tables(txt):
-                sheets.append((f"{name} · {t}" if t else name, cells))
+            blocks = markdown_tables(txt)
+            if blocks:
+                sheets.append((step["name"], blocks))
         out = out or (src.parent / f"{src.name}_analyse.xlsx")
     elif src.suffix.lower() == ".md":
-        sheets = markdown_tables(src.read_text(encoding="utf-8"))
+        blocks = markdown_tables(src.read_text(encoding="utf-8"))
+        sheets = [("Analyse", blocks)]
         out = out or src.with_suffix(".xlsx")
     else:
         print("ERREUR: Source attendue = fichier .md ou dossier de session.")

@@ -239,7 +239,7 @@ ou d'exactitude des générations LLM.
 | Fichier | Contenu |
 |---|---|
 | `output/<projet>_analyse.md` | Livrable complet **(document maître)** — texte, justifications, tableaux |
-| `output/<projet>_analyse.xlsx` | **Vue Excel des tableaux** — un onglet par tableau (livrable + productions d'étapes), en-têtes stylés, filtres, coloration des niveaux |
+| `output/<projet>_analyse.xlsx` | **Vue Excel des tableaux** — **un onglet par étape** (tableaux empilés à l'intérieur), en-têtes stylés, coloration des niveaux |
 | `output/<projet>_analyse.json` | Audit : toutes les productions par étape |
 | `output/sessions/<id>/` | Session reprenable + `stats.md`/`stats.json` |
 

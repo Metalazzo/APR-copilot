@@ -1,8 +1,8 @@
-"""Export Excel des tableaux d'analyse (v1.3.29).
+"""Export Excel des tableaux d'analyse (v1.3.29 — 1 onglet PAR ETAPE).
 
-Convertit les tableaux Markdown des livrables et des productions d'etapes en
-un classeur .xlsx (un onglet par tableau) avec en-tete stylé, filtres
-automatiques, volets figés et coloration des niveaux de risque/statut.
+Un classeur .xlsx avec UN onglet par etape (Cadrage, Filtrage, Scenarios,
+Barrieres, Livraison) : les tableaux y sont empiles avec leur titre de
+section, en-tete stylé, coloration des niveaux de risque/statut.
 
 Le .md reste le document maitre (texte, justifications) — l'Excel est une vue
 tabulaire produite en plus, sans modification du contenu.
@@ -15,13 +15,15 @@ from config import config as app_config
 
 try:
     from openpyxl import Workbook
-    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.styles import Alignment, Font
+    from openpyxl.styles import PatternFill
     from openpyxl.utils import get_column_letter
     OPENPYXL_OK = True
 except Exception:  # pragma: no cover - openpyxl absent
     OPENPYXL_OK = False
 
 _HEADER_FILL = "4472C4"
+_TITLE_COLOR = "1F3864"
 _SEV_FILL = {
     "critique": "C00000",
     "élevé": "ED7D31", "elevé": "ED7D31", "élevée": "ED7D31", "majeur": "ED7D31",
@@ -123,38 +125,60 @@ def markdown_tables(md: str) -> list[tuple[str, list[list[str]]]]:
     return tables
 
 
-def _write_sheet(wb, title: str, cells: list[list[str]], used: set) -> None:
-    ws = wb.create_sheet(_sheet_name(title, used))
-    ws.append([str(c) for c in (cells[0] if cells else [])])
-    for cell in ws[1]:
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = _fill(_HEADER_FILL)
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    for row in cells[1:]:
-        ws.append([str(c) for c in row])
+def _cell(row, col, value, wrap=True, bold=False):
+    c = row[col - 1] if col <= len(row) else row[0]
+    c.value = str(value) if value is not None else ""
+    c.alignment = Alignment(vertical="top", wrap_text=True)
+    if bold:
+        c.font = Font(bold=True, color="000000")
+    return c
+
+
+def _write_stacked_sheet(wb, name: str, blocks: list[tuple[str, list[list[str]]]],
+                         used: set) -> None:
+    """Un onglet par etape : les tableaux y sont EMPILES avec leur titre de
+    section (ligne grise foncee), separes d'une ligne vide."""
+    ws = wb.create_sheet(_sheet_name(name, used))
+    row_idx = 1
+    for t_title, cells in blocks:
+        if not cells:
+            continue
+        # ligne de titre de section
+        tcell = ws.cell(row=row_idx, column=1, value=t_title)
+        tcell.font = Font(bold=True, size=12, color=_TITLE_COLOR)
+        row_idx += 1
+        # en-tete du tableau
+        header = cells[0]
+        for c_idx, val in enumerate(header, 1):
+            cell = ws.cell(row=row_idx, column=c_idx, value=str(val))
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = _fill(_HEADER_FILL)
+            cell.alignment = Alignment(horizontal="center", vertical="center",
+                                       wrap_text=True)
+        row_idx += 1
+        for r in cells[1:]:
+            for c_idx, val in enumerate(r, 1):
+                cell = ws.cell(row=row_idx, column=c_idx, value=str(val) if val else "")
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+                key = (val or "").strip().lower()
+                if key in _SEV_FILL:
+                    cell.fill = _fill(_SEV_FILL[key])
+                    cell.font = Font(bold=True,
+                                     color="FFFFFF" if key in ("critique", "ko")
+                                     else "000000")
+            row_idx += 1
+        row_idx += 1  # ligne vide entre tableaux
 
     # largeurs de colonnes (premiere ligne de texte, bornees)
-    ncols = max((len(r) for r in cells), default=1)
-    for col in range(ncols):
+    for col in range(1, ws.max_column + 1):
+        letter = get_column_letter(col)
         width = 12
-        for r in cells[:60]:
-            if col < len(r):
-                first_line = (r[col] or "").split("\n")[0]
+        for r in range(1, min(ws.max_row, 300) + 1):
+            v = ws.cell(row=r, column=col).value
+            if v:
+                first_line = str(v).split("\n")[0]
                 width = max(width, min(len(first_line) + 2, 60))
-        ws.column_dimensions[get_column_letter(col + 1)].width = width
-
-    # retour a la ligne + coloration niveau/statut
-    for row in ws.iter_rows():
-        for cell in row:
-            cell.alignment = Alignment(vertical="top", wrap_text=True)
-            key = (cell.value or "").strip().lower()
-            if key in _SEV_FILL:
-                cell.fill = _fill(_SEV_FILL[key])
-                cell.font = Font(bold=True,
-                                 color="FFFFFF" if key in ("critique", "ko") else "000000")
-
-    ws.freeze_panes = "A2"
-    ws.auto_filter.ref = ws.dimensions
+        ws.column_dimensions[letter].width = width
 
 
 def _fill(color: str):
@@ -162,8 +186,11 @@ def _fill(color: str):
     return PatternFill("solid", fgColor=color)
 
 
-def export_xlsx(sheets: list[tuple[str, list[list[str]]]], path: Path) -> Path:
-    """Ecrit un classeur .xlsx : [(titre d'onglet, lignes)] ; retourne le chemin."""
+def export_xlsx(sheets: list[tuple[str, list[tuple[str, list[list[str]]]]]],
+                path: Path) -> Path:
+    """Ecrit un classeur : [(nom d'onglet, [(titre de tableau, lignes)])].
+
+    Un onglet par etape, tableaux empiles a l'interieur. Retourne le chemin."""
     if not OPENPYXL_OK:
         raise RuntimeError("openpyxl indisponible (pip install openpyxl)")
     path = Path(path)
@@ -171,10 +198,10 @@ def export_xlsx(sheets: list[tuple[str, list[list[str]]]], path: Path) -> Path:
     wb = Workbook()
     wb.remove(wb.active)
     used: set = set()
-    for title, cells in sheets:
-        if not cells:
+    for name, blocks in sheets:
+        if not blocks:
             continue
-        _write_sheet(wb, title, cells, used)
+        _write_stacked_sheet(wb, name, blocks, used)
     if not wb.sheetnames:
         ws = wb.create_sheet("Sans tableau")
         ws.append(["Aucun tableau detecte — le texte complet reste dans le .md"])
@@ -183,21 +210,17 @@ def export_xlsx(sheets: list[tuple[str, list[list[str]]]], path: Path) -> Path:
 
 
 def save_xlsx_from_outputs(outputs: dict, project: str, output_dir) -> Path:
-    """Classeur d'analyse : onglets du livrable (5 blocs) puis des productions
-    d'etapes. Appelé apres save_analysis_outputs (CLI et GUI)."""
+    """Classeur d'analyse : UN onglet par etape (Cadrage -> Livraison).
+    Appelé apres save_analysis_outputs (CLI et GUI)."""
     from agents.orchestrator import WORKFLOW_STEPS
 
-    sheets: list[tuple[str, list[list[str]]]] = []
-    liv = (outputs or {}).get("livraison", "")
-    if liv:
-        for title, cells in markdown_tables(liv):
-            sheets.append((title, cells))
+    sheets: list[tuple[str, list[tuple[str, list[list[str]]]]]] = []
     for step in WORKFLOW_STEPS:
-        if step["id"] == "livraison":
-            continue
         text = (outputs or {}).get(step["id"], "")
-        for k, (title, cells) in enumerate(markdown_tables(text), 1):
-            name = f"{step['name'].split(' - ', 1)[-1]}"
-            sheets.append((f"{name} · {title}" if title else name, cells))
+        if not text:
+            continue
+        blocks = markdown_tables(text)
+        if blocks:
+            sheets.append((step["name"], blocks))
     path = Path(output_dir) / f"{project}_analyse.xlsx"
     return export_xlsx(sheets, path)

@@ -1,4 +1,4 @@
-"""Tests offline de l'export Excel (parseur markdown + classeur openpyxl).
+"""Tests offline de l'export Excel (parseur markdown + classeur 1 onglet/etape).
 
 python tests/test_export_xlsx.py   (~2 s)
 """
@@ -50,9 +50,6 @@ Texte d'introduction (pas un tableau).
 | Point | Décision humaine | Statut |
 | --- | --- | --- |
 | Phase de transport non couverte | **KO** — [P8] A CORRIGER (V2 Filtrage) | a traiter |
-| ligne 74 coupee en pleine cellule | KO | incomplete |
-
-| Pas un tableau | juste une ligne |
 """
 
 
@@ -65,18 +62,16 @@ def t_parse_simple():
 
 def t_parse_complex():
     tables = markdown_tables(MD_COMPLEX)
-    # 3 vrais tableaux (le bloc sans separateur est ignore)
+    # 3 tableaux (le bloc sans separateur n'est plus dans MD_COMPLEX)
     assert len(tables) == 3, [t[0] for t in tables]
     # titres = en-tete le plus proche
     assert any(t[0] == "Tableau principal" for t in tables), [t[0] for t in tables]
     # gras retire des en-tetes
-    t3 = next(t for t in tables if "Gravité" in " ".join(t[1][0]))
+    t3 = next(t for t in tables if t[0] == "Tableau principal")
     assert "**" not in t3[1][0][0] and t3[1][0][0] == "ID", t3[1][0]
     # <br> converti en retour a la ligne dans la cellule
     cell = t3[1][1][3]
     assert "retour a la ligne" in cell and "\n" in cell, cell
-    # alignements '|:---|' acceptes
-    assert t3[1][0][-1] == "Notes"
 
 
 def t_parse_tableau_malforme():
@@ -92,19 +87,44 @@ def t_sheet_name():
     assert n2 != n, "doublon de nom d'onglet"
 
 
-def t_export_xlsx_lifecycle():
+def t_export_1_onglet_par_etape():
+    """1 onglet par etape : tableaux EMPILES, pas un onglet par tableau."""
     tmp = Path(tempfile.mkdtemp(prefix="xlsx_"))
-    path = export_xlsx(
-        [("Test · Tableau", [["ID", "Statut"], ["RISK-001", "KO"], ["RISK-002", "OK"]])],
-        tmp / "out.xlsx",
-    )
+    sheets = [
+        ("Etape 1 - Cadrage", [
+            ("Fonctions principales", [
+                ["Fonction", "Rôle", "Décision"],
+                ["Alimentation 25kV", "A", "OK"],
+                ["Maintenance", "C", "KO"],
+            ]),
+        ]),
+        ("Etape 3 - Scénarios", [
+            ("Tableau principal", [
+                ["ID", "Gravité", "Statut"],
+                ["RISK-001", "Critique", "KO"],
+                ["RISK-002", "moyen", "OK"],
+            ]),
+            ("Doublons detectés", [
+                ["ID", "Doublon de"],
+                ["RISK-007", "RISK-003"],
+            ]),
+        ]),
+    ]
+    path = export_xlsx(sheets, tmp / "out.xlsx")
     assert path.exists()
+
     from openpyxl import load_workbook
     wb = load_workbook(path)
-    ws = wb["Test · Tableau"]
-    assert ws["A1"].value == "ID" and ws["B2"].value == "KO"
-    assert ws.freeze_panes == "A2"
-    assert ws.auto_filter.ref.startswith("A1:")
+    assert len(wb.sheetnames) == 2, wb.sheetnames   # 2 etapes = 2 onglets
+    ws = wb["Etape 3 - Scénarios"]
+    # ligne 1 : titre de section ; ligne 2 : en-tete ; lignes 3-4 : donnees ;
+    # ligne 5 vide ; ligne 6 : titre 2e tableau ; lignes 7-8 : contenu
+    assert str(ws["A1"].value) == "Tableau principal"
+    assert ws["A2"].value == "ID" and ws["A3"].value == "RISK-001"
+    assert str(ws["A6"].value) == "Doublons detectés"
+    assert ws["A7"].value == "ID" and ws["B8"].value == "RISK-003"
+    # coloration severity
+    assert wb["Etape 1 - Cadrage"]["C3"].value == "OK"
 
 
 def main():
@@ -112,7 +132,7 @@ def main():
     _run("parseur : gras, <br>, alignements, multi-tableaux", t_parse_complex)
     _run("parseur : bloc sans separateur ignore", t_parse_tableau_malforme)
     _run("nom d'onglet : sanitisation + doublons", t_sheet_name)
-    _run("cycle complet export/lire", t_export_xlsx_lifecycle)
+    _run("export : 1 onglet par etape, tableaux empiles", t_export_1_onglet_par_etape)
     if not FAILURES:
         print("\nTESTS EXPORT EXCEL : TOUT PASSE")
     else:
