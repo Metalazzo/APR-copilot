@@ -438,6 +438,9 @@ class OrchestratorState:
     # re-generation. Distingue la validation du simple enregistrement de
     # decision (human_validations) : c'est LE champ de la reprise.
     validated: dict = field(default_factory=dict)
+    # Blocs de livraison deja generes (v1.3.26) : {bloc_id: texte} — sauvegardé
+    # apres chaque bloc pour que reprise/crash ne rejoue que les manquants
+    delivery_blocs: dict = field(default_factory=dict)
     # Qualifications humaines PAR POINT de relecture, persistant entre les
     # iterations d'une meme etape : {step_id: {point_id: {decision, text,
     # detail, iteration}}}. Les points deja decides ne sont pas re-soumis a
@@ -465,6 +468,7 @@ class OrchestratorState:
             "reviews": dict(self.reviews),
             "human_validations": dict(self.human_validations),
             "validated": dict(self.validated),
+            "delivery_blocs": dict(self.delivery_blocs),
             "point_decisions": self.point_decisions,
             "call_stats": list(self.call_stats),
             "models_used": dict(self.models_used),
@@ -505,6 +509,7 @@ class OrchestratorState:
                 else:
                     st.validated[sid] = False
         st.point_decisions = dict(data.get("point_decisions", {}) or {})
+        st.delivery_blocs = dict(data.get("delivery_blocs", {}) or {})
         st.call_stats = list(data.get("call_stats", []) or [])
         st.models_used = dict(data.get("models_used", {}) or {})
         st.added_docs = list(data.get("added_docs", []) or [])
@@ -951,7 +956,13 @@ class RiskAnalysisOrchestrator:
         en cours de route (livrable ampute du Bloc 4/5). Chaque bloc est
         desormais produit par un appel dedie, puis les blocs sont concatenes.
         Si un bloc est coupe par le plafond de sortie (tableau non termine),
-        un appel de CONTINUATION complete la generation (max 2)."""
+        un appel de CONTINUATION complete la generation (max 2).
+
+        Reprise partielle (v1.3.26) : chaque bloc genere est stocke dans la
+        session des sa production (state.delivery_blocs) — un crash a mi-
+        livraison ne rejoue que les blocs manquants. LIVRAISON_FORCE=true
+        reutilise les blocs stockes ; LIVRAISON_FORCE=all les re-generer tous."""
+        force_all_blocs = os.getenv("LIVRAISON_FORCE", "").lower() == "all"
         outputs = []
         total = len(LIVRAISON_BLOCS)
         limit = self._step_context_limit()
@@ -970,6 +981,23 @@ class RiskAnalysisOrchestrator:
                 "limit": limit,
             })
         for i, bloc in enumerate(LIVRAISON_BLOCS, 1):
+            # Reprise partielle : un bloc deja genere dans la session est
+            # REUTILISE tel quel (crash a mi-livraison = on ne rejoue que les
+            # manquants). LIVRAISON_FORCE=all force une regeneration complete.
+            stored = self.state.delivery_blocs.get(bloc["id"])
+            if stored and force_all_blocs is not True:
+                out = stored
+                print(f"[livraison] {bloc['titre']} : reutilise depuis la "
+                      f"session ({i}/{total})")
+                await self._emit({
+                    "type": "delivery_bloc",
+                    "step_id": step["id"],
+                    "bloc": f"{i}/{total}",
+                    "titre": bloc["titre"],
+                    "reuse": True,
+                })
+                outputs.append(f"## {bloc['titre']}\n\n{out.strip()}")
+                continue
             await self._emit({
                 "type": "delivery_bloc",
                 "step_id": step["id"],
@@ -1042,6 +1070,10 @@ class RiskAnalysisOrchestrator:
                     "type": "livrable_incomplet",
                     "bloc": bloc["titre"],
                 })
+            # Stocke le bloc FINAL (apres continuations) dans la session :
+            # un crash aux blocs suivants ne rejouera que les manquants
+            self.state.delivery_blocs[bloc["id"]] = out
+            await self._save_session()
             outputs.append(f"## {bloc['titre']}\n\n{out.strip()}")
             print(f"[livraison] {bloc['titre']} : {len(out)} caracteres ({i}/{total})")
 
@@ -1331,9 +1363,9 @@ class RiskAnalysisOrchestrator:
                     validated_ids.add(sid)
             if self.state.outputs.get("livraison") and os.getenv(
                 "LIVRAISON_FORCE", ""
-            ).lower() not in ("1", "true", "yes"):
+            ).lower() not in ("1", "true", "yes", "all"):
                 validated_ids.add("livraison")
-            elif os.getenv("LIVRAISON_FORCE", "").lower() in ("1", "true", "yes"):
+            elif os.getenv("LIVRAISON_FORCE", "").lower() in ("1", "true", "yes", "all"):
                 print("[session] LIVRAISON_FORCE : la livraison sera re-generee "
                       "seule (les etapes validees restent conservees)")
             print(f"[session] reprise : {len(validated_ids)} etape(s) validee(s) "

@@ -1,5 +1,70 @@
 # Changelog
 
+## [1.3.26] - 2026-09-20
+
+### Ajoute — harnais de reprise + sauvegarde par bloc de livraison
+
+**`tests/test_reprise.py`** (conservé, ~5 s, zéro appel LLM) : rejoue les
+scénarios critiques du state-machine de reprise — crash après CONTINUER,
+crash pendant une re-génération « à corriger » (régression du bug C1), QUITTER,
+reprise de session complète (régression du bug I2), `LIVRAISON_FORCE`,
+compat ancien format. **À exécuter après toute modification de
+l'orchestrateur** : `python tests/test_reprise.py`.
+
+**Reprise partielle de la livraison** : chaque bloc généré est stocké dans la
+session (`state.delivery_blocs`) dès sa production (+ sauvegarde atomique) —
+un crash à mi-livraison ne rejoue que les blocs manquants :
+- `LIVRAISON_FORCE=true` : réutilise les blocs stockés, génère les manquants
+- `LIVRAISON_FORCE=all` : re-génère les 5 blocs
+- la condition de reprise reconnaît « all » (la v1.3.21 skipait la livraison
+  même avec « all »)
+
+### Rollback
+- État pre-modification : commit `6aa630a`
+
+## [1.3.25] - 2026-09-16
+
+### Corrige — fixes de la revue de code (C1 + I1-I4 + mineurs)
+
+- **C1 (critique)** : un feedback « à corriger » en attente était traité comme
+  une validation à la reprise — corrections demandées silencieusement sautées.
+  Nouveau champ `state.validated` (True après CONTINUER/SANS CORRECTION, False
+  si feedback en attente) ; la reprise lit ce champ ; compat par dérivation
+- **I1** : la consultation d'une étape pendant son propre checkpoint masquait
+  la barre de décision (deadlock du checkpoint) → garde
+- **I2** : la reprise seede `all_outputs` depuis la session (JSON d'audit
+  complet ; plus d'écrasement d'un livrable complet par un bandeau)
+- **I3** : événements `livrable_incomplet` + `delivery_bloc_continuation`
+  branchés dans la GUI (badge + notification)
+- **I4** : troncature des sources de livraison signalée (marqueur + événement) ;
+  garde-fou limite dégénérée (<5000 car.) avec remède exact ; message
+  `context_truncated` honnête selon la source de la limite (M6)
+- Mineurs : M1/M2 avertissement par bloc (encore tronqué / quasi vide) ;
+  M3 secretary.md aligné sur le flux par blocs ; M4 CHANGELOG 1.3.24 (reporté à
+  cette version) ; M5 badge version ; M8 label « non ancré » distingue le
+  format du raté relecteur ; M9 config.input_dir → sample_docs + `--output-dir`
+  lu ; **I5 (PDFs dans l'historique)** = décision utilisateur : repo privé,
+  nettoyage d'historique requis avant tout passage public
+
+### Rollback
+- État pre-modification : commit `a97ff0a`
+
+## [1.3.24] - 2026-09-16
+
+### Publie — release privée (nettoyage données + LICENSE MIT + README public)
+
+- PDFs sensibles retirés du dépôt (données d'entrée réelles + guide CLUSIF
+  protégé) : `test/batterie/` et `test/references/*.pdf` ignorés, restent en
+  local pour le RAG
+- `test/exemple/description_exemple.txt` : exemple synthétique générique
+- README public : philosophie (l'humain garde les arbitrages), fonctionnalités,
+  démarrage rapide, confidentialité local-first/cloud UE, config, avertissement,
+  roadmap, licence + credits (développement assisté GLM 5.3 / DeepSeek V4)
+- LICENSE : MIT
+
+### Rollback
+- État pre-modification : commit `5f9337a`
+
 ## [1.3.23] - 2026-09-16
 
 ### Ajoute — switch GUI « Re-générer la LIVRAISON seule » dans le tiroir Sessions

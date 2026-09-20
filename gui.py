@@ -1165,7 +1165,7 @@ def build_page() -> None:
                 "Analyse Preliminaire de Risque multi-agents · 1 onglet par etape · "
                 "qualification inline"
             ).classes("text-subtitle2 text-grey")
-        ui.badge("APR Copilot v1.3.25", color="blue-grey")
+        ui.badge("APR Copilot v1.3.26", color="blue-grey")
 
     # ------------------------- Onglets par etape -------------------------
     step_cards.clear()
