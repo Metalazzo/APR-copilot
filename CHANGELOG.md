@@ -1,5 +1,35 @@
 # Changelog
 
+## [1.3.31] - 2026-09-21
+
+### Ajoute — cadre methodologique des barrieres (nature, referentiels, effet)
+
+Constat utilisateur : les barrieres ont des NATURES differentes
+(organisationnelle/mecanique/electronique-logicielle) dont les performances
+s'expriment DIFFEREMMENT, agissent sur l'occurrence ou la gravite, et on ne
+doit JAMAIS melanger les referentiels (ex. un SIL IEC 61508 — methode C-P-F-W —
+attribue a une barriere mecanique).
+
+- **`prompts/engineer.md`** : cadre methodologique (A. 3 natures · B.
+  performance SELON la nature : quantitative pour E/E/PE, qualitative
+  argumentee pour mecanique/organisationnel · C. « Agit sur » occurrence ou
+  gravite avec residuel recalculé en cohérence · D. interdiction du mélange
+  des referentiels) + **catalogue des referentiels de securite** par domaine
+  (IEC 61508/61511, ISO 12100/13849/62061, EN 50126/50128/50129/50155/50159,
+  ISO 26262, ARP4754A/4761, DO-178C/254, IEC 61513/62304/62443, ISO 27005/9001)
+  + regles de selection (domaine du cadrage, UN referentiel primaire par
+  barriere electronique, selectivite — pas de catalogue nom-dropping)
+- **Tache barrieres** : format par barriere enrichi (ID · NATURE ·
+  REFERENTIEL/PERFORMANCE selon nature · AGIT SUR occurrence/gravite ·
+  Type/Description/Efficacite · EXISTANTE vs RECOMMANDEE) + residuel
+  recalcule en coherence avec les effets declares
+- **Relecture client (barrieres)** : controles doubles — coherence
+  nature↔referentiel, SIL hors E/E/PE = faute bloquante, agit sur declare,
+  residuel coherent, **selectivite des referentiels** (hors sujet = defaut)
+- **Bloc 4 du livrable** : nature/referentiel/effet et facteur reduit
+  explicité repris dans le rapport final
+- Rollback : commit `855257f`
+
 ## [1.3.30] - 2026-09-21
 
 ### Modifie — export Excel : 1 onglet PAR ETAPE (relecture confortable)

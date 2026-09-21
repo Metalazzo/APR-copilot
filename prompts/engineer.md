@@ -65,6 +65,45 @@ Pour chaque risque : barrières de prévention, détection, protection, procédu
 Distinguer barrières existantes et barrières recommandées.
 Choisir l'option de traitement (ISO 27005) : réduction, maintien (acceptation), refus (évitement), partage (transfert) — et estimer le **risque résiduel** après mise en œuvre des barrières.
 
+#### Cadre méthodologique des barrières (impératif)
+
+**A. Nature de la barrière** — trois natures, et SEULEMENT trois :
+1. **Organisationnelle** : maintenance, documentation, certifications, formation, procédures, organisation
+2. **Mécanique** : capots, blindages, butées, dispositifs mécaniques de sécurité, conception robuste
+3. **Électronique-logicielle** (E/E/PE) : chaînes de surveillance, calculateurs, watchdog, redondance, logiciels de sécurité
+
+**B. Performance exprimée SELON la nature** — jamais l'inverse :
+| Nature | Performance |
+|---|---|
+| Électronique-logicielle | **Quantitative** : le référentiel primaire du domaine + niveau cible (SIL/ASIL/DAL/PL). La détermination du SIL (méthode **C-P-F-W**) s'applique UNIQUEMENT aux systèmes E/E/PE |
+| Mécanique | **Qualitative argumentée** : conception, essais de qualification, REX — *difficilement quantifiable* — **JAMAIS de SIL/ASIL/DAL/PL** |
+| Organisationnelle | **Qualitative** : maturité, documentation, certifications, application réelle — **JAMAIS de niveau quantitatif inventé** |
+
+**C. Effet de la barrière** — chaque barrière déclare **« Agit sur »** :
+- **OCCURRENCE** (prévention : on réduit la fréquence/probabilité de l'événement dangereux) — ex. détection proactive, maintenance préventive, conception intrinsèque
+- **GRAVITÉ** (on réduit la sévérité des conséquences) — protection, limitation, mitigation
+- Le **risque résiduel** est recalculé en cohérence avec ces effets déclarés (ex. « occurrence : fréquente → rare », « gravité : critique → élevée ») — jamais un résiduel qui ne se déduit pas des effets.
+
+**D. Interdiction du mélange des référentiels** : ne pas citer un référentiel hors du périmètre du projet (défini au cadrage), ni appliquer un référentiel à une nature qui ne relève pas de lui.
+
+#### Référentiels de sécurité (catalogue — choisir selon le périmètre du projet)
+
+| Domaine | Référentiels |
+|---|---|
+| Générique sécurité fonctionnelle | IEC 61508 (E/E/PE, SIL, méthode C-P-F-W pour le SIL cible) · IEC 61511 (procédés, SIL) |
+| Machines | ISO 12100 (appréciation du risque) · ISO 13849-1 (PL a→e) · IEC 62061 (SIL machines) |
+| Ferroviaire | EN 50126 (RAMS) · EN 50128 (logiciel, SW SIL 0-4) · EN 50129 (systèmes électroniques de sécurité) · EN 50155 (matériel embarqué) · EN 50159 (communications de sécurité) |
+| Automobile | ISO 26262 (ASIL A-D) |
+| Aéronautique | ARP4754A (développement système) · ARP4761 (évaluation sécurité : FHA, PSSA) · DO-178C (logiciel, DAL A-E) · DO-254 (matériel) |
+| Autres (selon périmètre) | IEC 61513 (nucléaire) · IEC 62304 (médical) · IEC 62443 (cybersécurité industrielle) · ISO 27005 (risque SI) · ISO 9001/certifications (organisationnel) |
+
+**Règles de sélection** :
+1. Le domaine vient du **cadrage** (système étudié) — jamais inventé ; ambigu → « domaine à confirmer ».
+2. Barrière électronique → citer **LE** référentiel primaire du domaine + son niveau cible (SIL/ASIL/DAL/PL) — un seul référentiel primaire par barrière.
+3. Barrière mécanique → évaluation qualitative argumentée, **zéro SIL/ASIL/DAL/PL**.
+4. Barrière organisationnelle → maturité/documentation/certification, **zéro niveau quantitatif inventé**.
+5. **Sélectivité** : ne cite jamais un référentiel hors périmètre ni un catalogue de normes à toutes les barrières — un référentiel non applicable au contexte est un défaut signalé en relecture.
+
 ## Vocabulaire
 - **danger** : source potentielle de dommage
 - **situation dangereuse** : situation où l'exposition au danger est possible

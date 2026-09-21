@@ -350,29 +350,55 @@ Categories de barrieres a couvrir (pour l'option REDUCTION) :
 4. Barrieres procedurales/organisationnelles (formations, procedures, maintenances preventives)
 5. Barrieres de conception (choix d'architecture, principes fail-safe, diversity)
 
-Pour chaque barriere :
+Pour chaque barrière :
 - ID de barriere : B-RISK-XXX-nn (rattachee a son scenario, ex. B-RISK-003-01)
   — reutilise par les relectures et le livrable, ne jamais livrer une barriere
   sans ID
+- NATURE : organisationnelle | mecanique | electronique-logicielle
+- REFERENTIEL/PERFORMANCE selon la nature (cadre methodologique dans ton
+  prompt systeme) :
+  * electronique-logicielle : le referentiel PRIMAIRE du domaine + niveau cible
+    (SIL/ASIL/DAL/PL) — la methode C-P-F-W (IEC 61508) s'applique UNIQUEMENT
+    aux systemes E/E/PE
+  * mecanique : evaluation QUALITATIVE argumentee (conception, essais,
+    qualification, REX) — JAMAIS de SIL/ASIL/DAL/PL
+  * organisationnelle : maturite, documentation, certifications — JAMAIS de
+    niveau quantitatif invente
+- AGIT SUR : occurrence | gravite (justifier en une ligne ; les deux si
+  veritablement double effet)
 - Type (prevention / detection / protection / recuperation)
 - Description de la barriere
-- Efficacite attendue
+- Efficacite attendue (niveau cible selon nature, ou qualitative argumentee)
 - Distinguer explicitement : barriere EXISTANTE (documentee) vs barriere RECOMMANDEE (proposee par l'agent)
 
 Puis, pour chaque risque :
 - Option de traitement retenue (REDUCTION / MAINTIEN / REFUS / PARTAGE) + justification courte
-- Risque RESIDUEL estime apres mise en oeuvre des barrieres (grille fournie ; marquer "a confirmer" si incertain)
+- Risque RESIDUEL estime en cohérence avec les effets declares : occurrence
+  et/ou gravite reduites, explicitées (ex. "occurrence : frequente -> rare") ;
+  marquer "a confirmer" si incertain — jamais un residuel qui ne se deduit
+  pas des effets declares.
 
 Appuie-toi sur le contexte documentaire (RAG) fourni pour les barrieres types.""",
         "reviewer_task": """Relis les barrieres proposees avec le regard du client/utilisateur final. Evalue :
 
 1. Les barrieres et l'analyse restent-elles centrees sur l'usage et l'integration prevus du produit, sans divergence du besoin client ?
 2. Les barrieres sont-elles realistes (budget, delais, competences) ?
-3. Sont-elles suffisamment concretes ou trop generiques ?
-4. Les barrieres proposees creent-elles de nouveaux risques ?
-5. Distingue-t-on bien barrieres existantes vs recommandees ?
-6. Y a-t-il des barrieres evidentes manquantes ?
-7. Les recommandations sont-elles actionnables par les equipes ?
+3. COHERENCE METHODOLOGIQUE (cadre barrieres) :
+   a. La NATURE de chaque barriere (organisationnelle/mecanique/electronique-
+      logicielle) correspond-elle au referentiel de performance cite ?
+   b. Un SIL/ASIL/DAL/PL est-il attribue a une barriere MECANIQUE ou
+      ORGANISATIONNELLE ? (interdit — faute methodologique bloquante)
+   c. Chaque barriere declare-t-elle AGIT SUR (occurrence ou gravite) ?
+   d. Le risque RESIDUEL est-il coherent avec les effets declares ?
+4. Les barrieres sont-elles suffisamment concretes ou trop generiques ?
+5. Les barrieres proposees creent-elles de nouveaux risques ?
+6. Distingue-t-on bien barrieres existantes vs recommandees ?
+7. Y a-t-il des barrieres evidentes manquantes ?
+8. Les recommandations sont-elles actionnables par les equipes ?
+9. SELECTIVITE DES REFERENTIELS : les normes citees sont-elles applicables au
+   perimetre du projet ? (un referentiel hors sujet — ex. DO-178C sur un
+   projet ferroviaire — ou un catalogue de normes versé a chaque barriere est
+   un defaut)
 
 Reponds avec :
 1. STATUT global : [OK / A REVOIR] + divergence oui/non (une phrase)
@@ -469,7 +495,9 @@ Reprends TOUS les scenarios fournis — AUCUN ne doit disparaitre. Ne resume pas
         "consigne": """Produis UNIQUEMENT le Bloc 4 du livrable : plan de traitement et decisions d'acceptation.
 Pour chaque risque non reduit a un niveau acceptable :
 - Option de traitement (REDUCTION / MAINTIEN / REFUS / PARTAGE)
+- Pour chaque mesure/barriere retenue : NATURE (organisationnelle | mecanique | electronique-logicielle), REFERENTIEL de performance selon la nature (SIL/ASIL/EN pour l'electronique-logicielle — evaluation qualitative argumentee pour mecanique/organisationnel — JAMAIS un SIL hors E/E/PE) et AGIT SUR (occurrence ou gravite)
 - Mesures et conditions d'execution
+- Risque residuel et le facteur reduit explicité (occurrence et/ou gravite)
 - Decision requise : QUI doit accepter (proprietaire des risques), a quel niveau
 - Conditions d'acceptation eventuelles (duree, en attendant une action...)
 - Suivi prevu (revue periodique)
