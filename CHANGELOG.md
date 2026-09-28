@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.3.36] - 2026-09-28
+
+### Modifie — infobulles lisibles sur ecran 1080p
+
+- Texte des infobulles « Max tokens » resserré (lignes courtes, puces)
+- **CSS global** : les infobulles (.q-tooltip) sont capées à 420 px de large
+  avec retour a la ligne — elles ne débordent plus de l'écran (aussi appliqué
+  aux infobulles d'ancrage des points)
+- Rollback : commit `635c2ba`
+
 ## [1.3.35] - 2026-09-28
 
 ### Ajoute — infobulles « Max tokens » (cloud et local)

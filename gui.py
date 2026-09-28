@@ -1174,6 +1174,12 @@ def build_page() -> None:
     global force_delivery_switch
     global tabs, sessions_container, fs_dialog, fs_md, fs_title, docs_added_md
 
+    # CSS global : infobulles lisibles sur ecran 1080p (largeur cappée)
+    ui.add_head_html(
+        "<style>.q-tooltip{max-width:420px !important;white-space:normal !important;"
+        "line-height:1.35;font-size:12px}</style>"
+    )
+
     with ui.row().classes("w-full items-center justify-between"):
         with ui.column().classes("gap-0"):
             ui.label("Risk Analysis Copilot — APR").classes("text-h5")
@@ -1351,11 +1357,11 @@ def build_page() -> None:
                     "Max tokens", value=app_config.profiles.local.max_tokens,
                     format="%.0f", min=256,
                 ).props("label-always").tooltip(
-                    "Plafond de SORTIE par appel en local : il réserve de la VRAM "
-                    "dans le budget de contexte (l'auto-contexte le soustrait).\n\n"
-                    "• Gardez ~20-30 % du contexte chargé (ex. 32768 sur 131k)\n"
-                    "• Trop bas = étapes tronquées\n"
-                    "• Trop haut = moins d'injections RAG possibles"
+                    "Plafond de sortie en local : réserve de la VRAM dans le "
+                    "budget de contexte.\n"
+                    "• Gardez 20-30 % du contexte chargé\n"
+                    "• Trop bas → étapes tronquées\n"
+                    "• Trop haut → moins d'injections RAG"
                 )
 
         with ui.card().classes("w-full"):
@@ -1379,13 +1385,11 @@ def build_page() -> None:
                     "Max tokens", value=app_config.profiles.cloud.max_tokens,
                     format="%.0f", min=256,
                 ).props("label-always").tooltip(
-                    "Plafond de SORTIE par appel (cloud) — les tokens générés sont "
-                    "facturés, mais le plafond ne coûte rien si la génération "
-                    "s'arrête naturellement.\n\n"
-                    "• 8192 = TROP PETIT : vos étapes font 30-90k caractères "
-                    "(≈ 10-25k tokens) → troncature garantie\n"
-                    "• Recommandé : 65536 (≈ 210k caractères, 2× la marge)\n"
-                    "• 1M = les boucles pathologiques seront facturées jusqu'au cap"
+                    "Plafond de sortie (les tokens générés sont facturés ; le cap "
+                    "ne coûte rien si la génération s'arrête seule).\n"
+                    "• 8192 : trop petit → étapes tronquées\n"
+                    "• 65536 : recommandé\n"
+                    "• 1M : boucles facturées jusqu'au cap"
                 )
 
         with ui.expansion("Parametres avances", icon="tune").classes("w-full"):
