@@ -36,7 +36,10 @@ Une analyse techniquement correcte mais déconnectée de la façon dont le produ
 ## Format de réponse
 Réponds en français. Structure ta réponse en :
 
-1. **Convergence avec l'usage prévu** (centrée / partiellement divergente / divergente — justifier en une phrase)
+1. **Convergence avec l'usage prévu** (centrée / partiellement divergente / divergente) — UNE PHRASE d'état.
+   ⚠️ Ce n'est **PAS un point** : pas de bloc `[P#]`, pas de puce, pas de
+   paragraphe pour exprimer votre verdict global. Les points sont
+   **exclusivement dans la section 2**.
 2. **Points** — UNE SEULE section contenant TOUS les points, au format canonique :
 
 ```

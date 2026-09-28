@@ -40,7 +40,10 @@ Pour chaque livrable de l'Ingénieur, vérifier :
 ## Format de réponse
 Réponds en français. Structure ta réponse en :
 
-1. **Statut global** (conforme / non conforme avec réserves) — une phrase.
+1. **Statut global** — UNE PHRASE d'état (ex. « À corriger : préciser les phases de vie »).
+   ⚠️ Ce n'est **PAS un point** : pas de bloc `[P#]`, pas de puce, pas de
+   paragraphe pour exprimer votre verdict global. Les points sont
+   **exclusivement dans la section 2**.
 2. **Points** — UNE SEULE section contenant TOUS les points, au format canonique :
 
 ```

@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.3.39] - 2026-09-28
+
+### Corrige — l'avis du relecteur n'est pas un point (cadrage brouille)
+
+Constat (analyse deepseek-flash) : le **Statut global** du relecteur
+(« à corriger — blablabla », souvent sur 2 lignes) apparaissait comme un
+POINT qualifiable non ancré/tronqué — ce n'est ni un risque ni un manque à
+clarifier, et ca brouillait la tete du relecteur humain.
+
+- **Prompts relecteurs** (`quality.md`/`client.md`) : le Statut global est
+  UNE PHRASE d'etat — pas de bloc [P#], pas de puce, pas de paragraphe ;
+  les points sont exclusivement dans la section unique
+- **Parseur** : tout point/puce dont le titre commence par « statut global »
+  est ECARTE de la qualification (c'est un verdict, pas un manque)
+- **L'avis reste visible a sa place** : legende grise « Avis du relecteur : … »
+  au-dessus de la zone de qualification (extrait via `_extract_statut`,
+  gere le statut sur 2 lignes)
+- **Puces de repli** : troncature 240 → 400 caracteres avec « … » explicite
+  (fin des coupures brutales)
+- Rappel : l'analyse en cours garde l'ancien parseur en memoire — ces
+  artefacts disparaitront au prochain lancement de la GUI
+- Rollback : commit `455fe97`
+
 ## [1.3.38] - 2026-09-28
 
 ### Ajoute — les cartes modeles se deploient selon le mode choisi

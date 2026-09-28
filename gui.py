@@ -165,6 +165,29 @@ def _norm_text(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", s)
 
 
+def _extract_statut(review_text: str) -> str:
+    """L'avis global du relecteur (ligne 'Statut global …') — c'est un
+    VERDICT de contexte, pas un point qualifiable (constat v1.3.40)."""
+    lines = (review_text or "").splitlines()
+    for i, line in enumerate(lines):
+        low = line.lower()
+        if "statut global" not in low and not re.match(r"^\s*\*{0,2}statut\s*:", low):
+            continue
+        cleaned = re.sub(r"[*_`#]+", "", line).strip()
+        cleaned = re.sub(r"(?i)^statut global\s*:?\s*", "", cleaned)
+        cleaned = re.sub(r"(?i)^statut\s*:?\s*", "", cleaned)
+        if not cleaned:
+            # le contenu est sur la/les lignes suivantes (statut sur 2 lignes)
+            for nxt in lines[i + 1:]:
+                nxt_clean = re.sub(r"[*_`#]+", "", nxt).strip()
+                if nxt_clean:
+                    cleaned = nxt_clean
+                    break
+        if cleaned:
+            return cleaned[:200]
+    return ""
+
+
 def _norm_match(a: str, b: str, min_len: int = 12) -> bool:
     """Egalite ou prefixe commun (apres normalisation) — detecte les points
     repetes avec une note ajoutee (ex. « (repete) », « idem P2 ») tout en
@@ -205,7 +228,16 @@ def _dedup_points(points: list[dict]) -> list[dict]:
             continue
         seen_norms.append(norm)
         seen.append(p)
-    return seen
+    # Passe 3 : les VERDICTS globaux ("Statut global : a corriger…") ne sont
+    # PAS des points qualifiables — c'est un avis de contexte (constat
+    # v1.3.40 : le relecteur les emettait comme points, brouillant l'humain).
+    final = []
+    for p in seen:
+        norm = _norm_text(p.get("text") or p.get("titre") or "")
+        if norm.startswith("statutglobal"):
+            continue
+        final.append(p)
+    return final
 
 
 def _parse_review_points(review_text: str, max_items: int = 100) -> list[dict]:
@@ -301,9 +333,10 @@ def _parse_review_points(review_text: str, max_items: int = 100) -> list[dict]:
         # retire pour que la deduplication par texte normalise fonctionne
         item = re.sub(r"^\[?(P\d+)\]?\s*[-:—]?\s*", "", item)
         if len(item) > 3 and not item.lower().startswith(("http", "source ")):
-            txt = item[:240]
+            if len(item) > 400:
+                item = item[:400] + "…"
             points.append((line_start, {
-                "id": None, "titre": txt, "text": txt,
+                "id": None, "titre": item, "text": item,
                 "localisation": "", "extrait": "", "verdict": "",
                 "justification": "", "correction": ""}))
     points.sort(key=lambda t: t[0])
@@ -455,6 +488,14 @@ def _render_step_points(step_id: str, interactive: bool) -> None:
                     f"Points soulevés par la relecture ({len(new_points)}) — "
                     "qualifiez chacun :"
                 ).classes("text-subtitle2")
+                # Avis global du relecteur : contexte lisible, PAS a qualifier
+                statut = _extract_statut(card.get("review_text") or "")
+                if statut:
+                    ui.label(f"Avis du relecteur : {statut}").classes(
+                        "text-caption text-blue-grey"
+                    ).style(
+                        "border-left: 3px solid #90a4ae; padding-left: 8px"
+                    )
                 ui.label(
                     "« À corriger » = le problème est réel, déclenche une re-génération. "
                     "« Sans objet » / « Déjà traité » = pas de correction ; c'est tracé "
