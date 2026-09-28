@@ -37,6 +37,75 @@ async def ingest_command(args):
     print(f"Collection : {app_config.rag.collection_name}")
 
 
+async def check_api_command(args):
+    """Diagnostique une API cloud : /models (liste + token) puis mini chat.
+    Affiche exactement ou ca casse (401 ? 404 ? 400 modele inconnu ?)."""
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    profile = (app_config.profiles.cloud if args.profile == "cloud"
+               else app_config.profiles.local)
+    base = (args.url or profile.base_url or "").rstrip("/")
+    key = args.key or profile.api_key or ""
+    model = args.model or profile.model or ""
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "User-Agent": "APR-Copilot/1.0",
+    }
+    print(f"[check] base : {base}")
+    print(f"[check] modele declare : {model}")
+    models = []
+    try:
+        with urllib.request.urlopen(
+            urllib.request.Request(base + "/models", headers=headers), timeout=20
+        ) as resp:
+            data = _json.loads(resp.read().decode("utf-8", errors="replace"))
+        models = [str(m.get("id", "?")) for m in data.get("data", [])]
+        print(f"[OK] /models : {len(models)} modele(s) — token et URL racine valides")
+        for mid in models[:20]:
+            print("    -", mid)
+        if model and model not in models:
+            norm = model.lower().replace(" ", "")[:10]
+            close = [m for m in models if norm[:6] in m.lower().replace(" ", "")[:10]]
+            hint = f", noms proches : {close[:5]}" if close else ""
+            print(f"[WARN] {model!r} ABSENT de la liste{hint} — copiez un nom EXACT ci-dessus")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")[:300]
+        print(f"[ERREUR] /models -> HTTP {e.code} : {body}")
+        if e.code == 401:
+            print("   -> token invalide ou mal formule")
+        elif e.code == 404:
+            print("   -> URL racine probablement fausse (verifiez le /v1 et les suffixes)")
+        return
+    except Exception as exc:
+        print(f"[ERREUR] /models injoignable : {exc} (reseau ? proxy d'entreprise ?)")
+        return
+
+    body = _json.dumps({
+        "model": model,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 1,
+    })
+    try:
+        req = urllib.request.Request(base + "/chat/completions",
+                                     data=body.encode("utf-8"), headers=headers,
+                                     method="POST")
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = _json.loads(resp.read().decode("utf-8", errors="replace"))
+        served = (data.get("choices") or [{}])[0].get("message", {}).get("model", model)
+        print(f"[OK] /chat/completions : le modele {served} a repondu")
+        print("VERDICT : l'API fonctionne — relancez l'analyse.")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")[:400]
+        print(f"[ERREUR] /chat/completions -> HTTP {e.code} : {body}")
+        if e.code == 400 and "model" in body.lower():
+            print("   -> nom de modele invalide : copiez-en un EXACT depuis la liste /models")
+    except Exception as exc:
+        print(f"[ERREUR] /chat/completions : {exc}")
+
+
 async def sessions_command(args):
     """Liste les sessions sauvegardees avec la commande de reprise prete a copier."""
     from session_store import SESSIONS_ROOT, list_sessions
@@ -293,6 +362,15 @@ def main():
     )
     export_parser.add_argument("--output", default=None, help="Chemin du .xlsx de sortie")
 
+    check_parser = subparsers.add_parser(
+        "check-api",
+        help="Diagnostiquer une API cloud : /models puis mini chat-completion",
+    )
+    check_parser.add_argument("--profile", choices=["cloud", "local"], default="cloud")
+    check_parser.add_argument("--url", default=None, help="Base URL (defaut : profil)")
+    check_parser.add_argument("--key", default=None, help="Cle API (defaut : profil)")
+    check_parser.add_argument("--model", default=None, help="Modele a tester (defaut : profil)")
+
     args = parser.parse_args()
 
     if args.command == "ingest":
@@ -303,6 +381,8 @@ def main():
         asyncio.run(sessions_command(args))
     elif args.command == "export-xlsx":
         asyncio.run(export_xlsx_command(args))
+    elif args.command == "check-api":
+        asyncio.run(check_api_command(args))
     elif args.command == "analyze":
         asyncio.run(analyze_command(args))
     else:

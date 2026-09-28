@@ -37,7 +37,7 @@ class ModelProfile:
 @dataclass
 class ModelProfiles:
     cloud: ModelProfile = field(default_factory=lambda: ModelProfile(
-        model=os.getenv("CLOUD_MODEL", "deepseek-v4-flash"),
+        model=os.getenv("CLOUD_MODEL", "deepseek-flash"),
         base_url=os.getenv("CLOUD_BASE_URL", "https://api.deepseek.com/v1"),
         api_key=os.getenv("CLOUD_API_KEY", ""),
         temperature=float(os.getenv("CLOUD_TEMPERATURE", "0.3")),

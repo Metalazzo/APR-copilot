@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.3.33] - 2026-09-28
+
+### Corrige/Ajoute — champ « Pour l'humain » + défauts cloud + check-api
+
+- **Points fantômes « Pour l'humain : oui/non »** (constaté sur l'analyse
+  deepseek-flash du 28/09) : le champ `- Pour l'humain : oui` du format canonique
+  (v1.3.19) n'était pas reconnu comme champ de bloc → le parseur en faisait des
+  POINTS non ancrés incompréhensibles. Corrigé : reconnu comme champ (le bloc ne
+  se termine plus dessus), stocké dans le point (`pour_humain`) et affiché en
+  GUI « 👨 Décision humaine attendue sur ce point » quand = oui
+- **`CLOUD_MODEL` défaut périmé** : `deepseek-v4-flash` n'existe plus côté API
+  (erreur 400 « The supported API model names are deepseek-flash,
+  deepseek-v4-pro ») → défaut `deepseek-flash`
+- **`python main.py check-api`** : diagnostic d'une API cloud en une commande —
+  `/models` (liste les noms de modèles valides, vérifie token et URL racine,
+  signale si le modèle déclaré est absent) puis mini chat-completion (1 token)
+  ; messages précis par code (401 token, 404 URL, 400 modèle)
+- Rollback : commit `69041e8`
+
 ## [1.3.32] - 2026-09-28
 
 ### Corrige — injection d'un fichier de contexte (GUI) : API NiceGUI 3.x

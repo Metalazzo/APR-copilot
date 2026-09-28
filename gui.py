@@ -153,7 +153,7 @@ _CANON_BLOCK_RE = re.compile(
 )
 _FIELD_LINE_RE = re.compile(
     r"^-\s*\*{0,2}(Localisation|Extrait|Verdict|Justification|Correction|"
-    r"Recommandation|Statut)\b[^:]*:", re.IGNORECASE
+    r"Recommandation|Statut|Pour l.humain)\b[^:]*:", re.IGNORECASE
 )
 _BULLET_RE = re.compile(r"^(?:[-*•]|\d+[.)])\s+(.+)$")
 
@@ -254,7 +254,7 @@ def _parse_review_points(review_text: str, max_items: int = 100) -> list[dict]:
         pid = f"P{int(raw)}" if raw.isdigit() else f"P{raw[1:]}"
         p = {"id": pid, "titre": m.group(2).strip(),
              "localisation": "", "extrait": "", "verdict": "",
-             "justification": "", "correction": ""}
+             "justification": "", "correction": "", "pour_humain": ""}
         lines = text[m.end():block_end].splitlines()
         for li, line in enumerate(lines):
             clean = line.strip().replace("*", "")
@@ -278,6 +278,8 @@ def _parse_review_points(review_text: str, max_items: int = 100) -> list[dict]:
                 p["justification"] = val
             elif key.startswith(("correction", "proposition")):
                 p["correction"] = val
+            elif key.startswith("pour l"):
+                p["pour_humain"] = val[:40]
         p["text"] = p["titre"]
         points.append((m.start(), p))
 
@@ -493,6 +495,10 @@ def _render_step_points(step_id: str, interactive: bool) -> None:
                                 ui.label(
                                     f"Justification : {pt['justification'][:220]}"
                                 ).classes("text-caption")
+                            if (pt.get("pour_humain") or "").strip().lower().startswith("oui"):
+                                ui.label("👨 Décision humaine attendue sur ce point").classes(
+                                    "text-caption text-blue"
+                                )
                             with ui.row().classes("w-full items-center gap-2"):
                                 if pt.get("localisation"):
                                     ui.label(f"📍 {pt['localisation']}").classes(
