@@ -193,11 +193,11 @@ def _extract_statut(review_text: str) -> str:
                         or _norm_text(nxt_s) in ("points", "point")):
                     break
                 gathered.append(re.sub(r"[*_`#]+", "", nxt_s))
-                if len(" ".join(gathered)) > 180:
+                if len(" ".join(gathered)) > 600:
                     break
             cleaned = " ".join(gathered)
         if cleaned:
-            return cleaned[:200]
+            return cleaned[:600]
     return ""
 
 

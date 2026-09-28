@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.3.43] - 2026-09-29
+
+### Corrige — avis du relecteur coupe a ~200 caracteres
+
+Constat : « Avis du relecteur : A COMPLETER — divergence : non sur le fond
+(…), mais couverture terrain incomplète et un défaut de traçabilité compromet-
+tant son exploita » — coupure brutale : le plafond d'extraction etait a
+200 caracteres (et 180 dans la collecte multi-lignes).
+
+- Plafonds releves a **600 caracteres** (extraction ligne unique et collecte
+  multi-lignes) — l'avis complet s'affiche dans la legende (wrap)
+- `tests/test_statut_global.py` : scenario d'avis long ajoute
+- Rollback : commit `c6ddd3c`
+
 ## [1.3.42] - 2026-09-29
 
 ### Corrige — avis du relecteur tronque a « 1. Statut global »

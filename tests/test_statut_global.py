@@ -75,6 +75,14 @@ def t_statut_numerote():
     assert "points" not in avis.lower(), avis
 
 
+def t_statut_long():
+    """Avis long : le plafond d'extraction est 600 car. (fini la coupure a 200
+    qui etait un artefact — constat v1.3.43)."""
+    long_text = "À COMPLÉTER — divergence : non sur le fond, mais " + "x" * 600
+    avis = _extract_statut(f"Statut global : {long_text}")
+    assert len(avis) <= 600 and len(avis) >= 500, len(avis)
+
+
 def t_pas_de_statut():
     assert _extract_statut("### [P1] Un point\n- Verdict : MINEUR") == ""
 
@@ -84,6 +92,7 @@ def main():
     _run("avis du relecteur extrait comme contexte", t_avis_extrait)
     _run("absence d'avis -> chaine vide", t_pas_de_statut)
     _run("statut numerote (1. **Statut global**) -> contenu ramasse", t_statut_numerote)
+    _run("avis long : plafond 600 car. (fini la coupure a 200)", t_statut_long)
     if not FAILURES:
         print("\nTEST STATUT GLOBAL : TOUT PASSE")
     else:
