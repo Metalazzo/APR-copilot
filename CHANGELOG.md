@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.3.37] - 2026-09-28
+
+### Modifie — onglet « ⚙ Configuration » (gagner la hauteur verticale)
+
+Constat (ecran 24" 1080p) : les tiroirs empiles sous les etapes rendaient la
+configuration difficile a retrouver et gachaient la hauteur disponible.
+
+- **Nouveau 1er onglet « ⚙ Configuration »** : Lancement (projet, contexte,
+  upload, bouton), Affectation des modeles, Serveur local, Modele cloud,
+  Parametres avances, Documents RAG, Sessions sauvegardees — tout le contenu
+  des anciens tiroirs bas, regroupe
+- **Les 5 onglets d'etapes suivent**, inchangés — la zone d'analyse occupe
+  toute la hauteur
+- **Journal compact (140 px) sous tous les onglets** — visible en permanence
+  pendant l'analyse
+- **Bascule automatique** : au lancement (et a chaque etape/reprise), l'affi-
+  chage saute sur l'onglet de l'etape en cours ; retour a la Configuration
+  d'un clic
+- Badge version mis a jour (v1.3.37)
+- Rollback : commit `00e08a5`
+
 ## [1.3.36] - 2026-09-28
 
 ### Modifie — infobulles lisibles sur ecran 1080p

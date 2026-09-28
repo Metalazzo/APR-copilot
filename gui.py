@@ -1187,9 +1187,9 @@ def build_page() -> None:
                 "Analyse Preliminaire de Risque multi-agents · 1 onglet par etape · "
                 "qualification inline"
             ).classes("text-subtitle2 text-grey")
-        ui.badge("APR Copilot v1.3.26", color="blue-grey")
+        ui.badge("APR Copilot v1.3.37", color="blue-grey")
 
-    # ------------------------- Onglets par etape -------------------------
+    # --------- Onglets : Configuration d'abord, puis les 5 etapes ---------
     step_cards.clear()
     decided_points_by_step.clear()
     decision_rows.clear()
@@ -1197,12 +1197,195 @@ def build_page() -> None:
 
     tabs = ui.tabs().classes("w-full")
     with tabs:
+        config_tab = ui.tab(name="configuration", label="⚙ Configuration")
         for step in WORKFLOW_STEPS:
             # etiquette courte : apres "Etape N - "
             short = step["name"].split(" - ", 1)[-1]
             step_tabs[step["id"]] = ui.tab(name=step["id"], label=short)
 
-    with ui.tab_panels(tabs, value=step_tabs[WORKFLOW_STEPS[0]["id"]]).classes("w-full"):
+    with ui.tab_panels(tabs, value=config_tab).classes("w-full"):
+        # ------------------ Onglet Configuration ------------------
+        with ui.tab_panel(config_tab).classes("w-full"):
+            with ui.card().classes("w-full"):
+                ui.label("Lancement").classes("text-subtitle1")
+                project_input = ui.input("Nom du projet", value="Test_Projet").classes("w-full")
+                context_input = ui.textarea(
+                    "Contexte / description du systeme", value=""
+                ).classes("w-full")
+                ui.upload(
+                    on_upload=on_context_upload, auto_upload=True
+                ).props('accept=.txt,.md label="Charger un fichier de contexte"').classes("w-full")
+                run_btn = ui.button(
+                    "Lancer l'analyse", icon="play_arrow", on_click=start_analysis
+                ).classes("w-full")
+                run_progress = ui.linear_progress(show_value=False).props(
+                    "indeterminate instant-feedback"
+                )
+                run_progress.set_visibility(False)
+
+            with ui.card().classes("w-full"):
+                ui.label("Affectation des modeles").classes("text-subtitle1")
+                mode_radio = ui.radio(
+                    {
+                        "hybrid": "Hybride (cloud + local)",
+                        "cloud": "Tout sur le cloud",
+                        "local": "Tout en local",
+                    },
+                    value=app_config.profiles.agent_profile,
+                ).props("dense")
+
+            with ui.card().classes("w-full"):
+                ui.label("Serveur local (compatible OpenAI : LM Studio, llama.cpp, "
+                         "koboldcpp, Ollama...)").classes("text-subtitle1")
+                local_base_url = ui.input(
+                    "Base URL", value=app_config.profiles.local.base_url
+                ).classes("w-full")
+                with ui.row().classes("w-full items-center"):
+                    local_model = ui.select(
+                        [], with_input=True, label="Modele charge"
+                    ).classes("grow")
+                    ui.button(icon="refresh", on_click=list_models).props("flat dense")
+                local_api_key = ui.input(
+                    "Cle API", value=app_config.profiles.local.api_key or "not-needed"
+                ).classes("w-full")
+                with ui.row().classes("w-full items-center"):
+                    local_temp = ui.number(
+                        "Temperature", value=app_config.profiles.local.temperature,
+                        min=0, max=2, step=0.05,
+                    ).props("label-always")
+                    local_max_tokens = ui.number(
+                        "Max tokens", value=app_config.profiles.local.max_tokens,
+                        format="%.0f", min=256,
+                    ).props("label-always").tooltip(
+                        "Plafond de sortie en local : réserve de la VRAM dans le "
+                        "budget de contexte.\n"
+                        "• Gardez 20-30 % du contexte chargé\n"
+                        "• Trop bas → étapes tronquées\n"
+                        "• Trop haut → moins d'injections RAG"
+                    )
+
+            with ui.card().classes("w-full"):
+                ui.label("Modele cloud").classes("text-subtitle1")
+                cloud_model = ui.input(
+                    "Modele", value=app_config.profiles.cloud.model
+                ).classes("w-full")
+                cloud_base_url = ui.input(
+                    "Base URL", value=app_config.profiles.cloud.base_url
+                ).classes("w-full")
+                cloud_api_key = ui.input(
+                    "Cle API", value=app_config.profiles.cloud.api_key,
+                    password=True,
+                ).classes("w-full")
+                with ui.row().classes("w-full items-center"):
+                    cloud_temp = ui.number(
+                        "Temperature", value=app_config.profiles.cloud.temperature,
+                        min=0, max=2, step=0.05,
+                    ).props("label-always")
+                    cloud_max_tokens = ui.number(
+                        "Max tokens", value=app_config.profiles.cloud.max_tokens,
+                        format="%.0f", min=256,
+                    ).props("label-always").tooltip(
+                        "Plafond de sortie (les tokens générés sont facturés ; le cap "
+                        "ne coûte rien si la génération s'arrête seule).\n"
+                        "• 8192 : trop petit → étapes tronquées\n"
+                        "• 65536 : recommandé\n"
+                        "• 1M : boucles facturées jusqu'au cap"
+                    )
+
+            with ui.expansion("Parametres avances", icon="tune").classes("w-full"):
+                function_calling_switch = ui.switch("Tool calling", value=True)
+                reasoning_select = ui.select(
+                    {
+                        "off": "Off (rapide)",
+                        "low": "Low",
+                        "medium": "Medium",
+                        "high": "High",
+                        "xhigh": "XHigh",
+                    },
+                    value=os.getenv("LLM_REASONING", "off"),
+                    label="Niveau de raisonnement",
+                ).classes("w-full")
+                web_search_switch = ui.switch(
+                    "Recherche web (etat de l'art)", value=False
+                )
+                web_backend = ui.select(
+                    {
+                        "ddg": "DuckDuckGo (sans cle)",
+                        "searxng": "SearXNG (auto-heberge)",
+                        "tavily": "Tavily (cle cloud)",
+                    },
+                    value=os.getenv("WEB_SEARCH_BACKEND", "ddg"),
+                    label="Backend de recherche",
+                ).classes("w-full")
+                searxng_url_input = ui.input(
+                    "URL SearXNG", value=os.getenv("SEARXNG_URL", "")
+                ).classes("w-full")
+                tavily_key_input = ui.input(
+                    "Cle Tavily", value=os.getenv("TAVILY_API_KEY", ""), password=True
+                ).classes("w-full")
+                with ui.row().classes("w-full items-center"):
+                    timeout_input = ui.number(
+                        "Timeout appel LLM (s)",
+                        value=float(os.getenv("LLM_TIMEOUT", "1800")),
+                        format="%.0f", min=30,
+                    ).props("label-always")
+                    retries_input = ui.number(
+                        "Retries", value=float(os.getenv("LLM_MAX_RETRIES", "1")),
+                        format="%.0f", min=0,
+                    ).props("label-always")
+                step_context_limit_input = ui.number(
+                    "Limite de contexte par etape precedente (caracteres)",
+                    value=float(os.getenv("STEP_CONTEXT_LIMIT", "40000")),
+                    format="%.0f", min=1000,
+                ).props("label-always").classes("w-full")
+                context_auto_switch = ui.switch(
+                    "Contexte auto (LM Studio, llama.cpp, koboldcpp... sinon LOCAL_CONTEXT_TOKENS)", value=True
+                )
+
+            with ui.expansion(
+                "Documents RAG (ajout possible pendant l'analyse)", icon="folder"
+            ).classes("w-full"):
+                ingest_dir = ui.input(
+                    "Dossier de documents", value=str(app_config.input_dir)
+                ).classes("w-full")
+                ingest_reset = ui.switch(
+                    "Reinitialiser l'index avant ingestion", value=False
+                )
+                with ui.row().classes("w-full items-center"):
+                    ingest_btn = ui.button(
+                        "Ingestion", icon="upload_file", on_click=do_ingest
+                    )
+                    ingest_progress = ui.linear_progress(show_value=False).props(
+                        "indeterminate instant-feedback"
+                    ).classes("grow")
+                    ingest_progress.set_visibility(False)
+                with ui.row().classes("w-full items-center"):
+                    ui.button(
+                        "Statut de l'index", icon="storage", on_click=show_stats
+                    ).props("flat dense")
+                docs_added_md = ui.markdown("").classes("text-caption")
+                ui.label(
+                    "Pendant un checkpoint : ajoutez le document, puis citez le passage "
+                    "utile dans votre feedback — l'etape suivante (et les re-generations) "
+                    "le verront via le RAG."
+                ).classes("text-caption text-grey")
+
+            with ui.expansion("Sessions sauvegardees", icon="history").classes("w-full"):
+                with ui.row().classes("w-full items-center"):
+                    ui.button("Rafraichir", icon="refresh", on_click=_refresh_sessions).props(
+                        "flat dense"
+                    )
+                force_delivery_switch = ui.switch(
+                    "Re-générer la LIVRAISON seule à la reprise (--force-delivery)",
+                    value=False,
+                )
+                ui.label(
+                    "À cocher si le livrable d'une session était tronqué : les étapes "
+                    "validées restent conservées, la livraison seule est re-générée."
+                ).classes("text-caption text-grey")
+                sessions_container = ui.column().classes("w-full")
+                _refresh_sessions()
+
         for step in WORKFLOW_STEPS:
             with ui.tab_panel(step_tabs[step["id"]]).classes("w-full"):
                 with ui.row().classes("w-full items-center justify-between no-wrap"):
@@ -1269,195 +1452,10 @@ def build_page() -> None:
                 for el in (feedback_input, b_c, b_q, b_f, status):
                     el.set_visibility(False)
 
-    # ------------------------- Journal (tiroir) -------------------------
-    with ui.expansion("Journal", icon="receipt_long").classes("w-full"):
-        log = ui.log(max_lines=500).classes("w-full").style("height: 220px")
-        log.push("Astuce : reglages et lancement dans le tiroir « Réglages » ;")
-        log.push("documents ajoutables pendant l'analyse via « Documents RAG ».")
-
-    # ------------------------- Documents RAG (tiroir) -------------------------
-    with ui.expansion(
-        "Documents RAG (ajout possible pendant l'analyse)", icon="folder"
-    ).classes("w-full"):
-        ingest_dir = ui.input(
-            "Dossier de documents", value=str(app_config.input_dir)
-        ).classes("w-full")
-        ingest_reset = ui.switch(
-            "Reinitialiser l'index avant ingestion", value=False
-        )
-        with ui.row().classes("w-full items-center"):
-            ingest_btn = ui.button(
-                "Ingestion", icon="upload_file", on_click=do_ingest
-            )
-            ingest_progress = ui.linear_progress(show_value=False).props(
-                "indeterminate instant-feedback"
-            ).classes("grow")
-            ingest_progress.set_visibility(False)
-        with ui.row().classes("w-full items-center"):
-            ui.button(
-                "Statut de l'index", icon="storage", on_click=show_stats
-            ).props("flat dense")
-        docs_added_md = ui.markdown("").classes("text-caption")
-        ui.label(
-            "Pendant un checkpoint : ajoutez le document, puis citez le passage "
-            "utile dans votre feedback — l'etape suivante (et les re-generations) "
-            "le verront via le RAG."
-        ).classes("text-caption text-grey")
-
-    # ------------------------- Sessions (tiroir) -------------------------
-    with ui.expansion("Sessions sauvegardees", icon="history").classes("w-full"):
-        with ui.row().classes("w-full items-center"):
-            ui.button("Rafraichir", icon="refresh", on_click=_refresh_sessions).props(
-                "flat dense"
-            )
-        force_delivery_switch = ui.switch(
-            "Re-générer la LIVRAISON seule à la reprise (--force-delivery)",
-            value=False,
-        )
-        ui.label(
-            "À cocher si le livrable d'une session était tronqué : les étapes "
-            "validées restent conservées, la livraison seule est re-générée."
-        ).classes("text-caption text-grey")
-        sessions_container = ui.column().classes("w-full")
-        _refresh_sessions()
-
-    # ------------------------- Reglages (tiroir) -------------------------
-    with ui.expansion("Réglages & lancement", icon="settings").classes("w-full"):
-        with ui.card().classes("w-full"):
-            ui.label("Affectation des modeles").classes("text-subtitle1")
-            mode_radio = ui.radio(
-                {
-                    "hybrid": "Hybride (cloud + local)",
-                    "cloud": "Tout sur le cloud",
-                    "local": "Tout en local",
-                },
-                value=app_config.profiles.agent_profile,
-            ).props("dense")
-
-        with ui.card().classes("w-full"):
-            ui.label("Serveur local (compatible OpenAI : LM Studio, llama.cpp, "
-                     "koboldcpp, Ollama...)").classes("text-subtitle1")
-            local_base_url = ui.input(
-                "Base URL", value=app_config.profiles.local.base_url
-            ).classes("w-full")
-            with ui.row().classes("w-full items-center"):
-                local_model = ui.select(
-                    [], with_input=True, label="Modele charge"
-                ).classes("grow")
-                ui.button(icon="refresh", on_click=list_models).props("flat dense")
-            local_api_key = ui.input(
-                "Cle API", value=app_config.profiles.local.api_key or "not-needed"
-            ).classes("w-full")
-            with ui.row().classes("w-full items-center"):
-                local_temp = ui.number(
-                    "Temperature", value=app_config.profiles.local.temperature,
-                    min=0, max=2, step=0.05,
-                ).props("label-always")
-                local_max_tokens = ui.number(
-                    "Max tokens", value=app_config.profiles.local.max_tokens,
-                    format="%.0f", min=256,
-                ).props("label-always").tooltip(
-                    "Plafond de sortie en local : réserve de la VRAM dans le "
-                    "budget de contexte.\n"
-                    "• Gardez 20-30 % du contexte chargé\n"
-                    "• Trop bas → étapes tronquées\n"
-                    "• Trop haut → moins d'injections RAG"
-                )
-
-        with ui.card().classes("w-full"):
-            ui.label("Modele cloud").classes("text-subtitle1")
-            cloud_model = ui.input(
-                "Modele", value=app_config.profiles.cloud.model
-            ).classes("w-full")
-            cloud_base_url = ui.input(
-                "Base URL", value=app_config.profiles.cloud.base_url
-            ).classes("w-full")
-            cloud_api_key = ui.input(
-                "Cle API", value=app_config.profiles.cloud.api_key,
-                password=True,
-            ).classes("w-full")
-            with ui.row().classes("w-full items-center"):
-                cloud_temp = ui.number(
-                    "Temperature", value=app_config.profiles.cloud.temperature,
-                    min=0, max=2, step=0.05,
-                ).props("label-always")
-                cloud_max_tokens = ui.number(
-                    "Max tokens", value=app_config.profiles.cloud.max_tokens,
-                    format="%.0f", min=256,
-                ).props("label-always").tooltip(
-                    "Plafond de sortie (les tokens générés sont facturés ; le cap "
-                    "ne coûte rien si la génération s'arrête seule).\n"
-                    "• 8192 : trop petit → étapes tronquées\n"
-                    "• 65536 : recommandé\n"
-                    "• 1M : boucles facturées jusqu'au cap"
-                )
-
-        with ui.expansion("Parametres avances", icon="tune").classes("w-full"):
-            function_calling_switch = ui.switch("Tool calling", value=True)
-            reasoning_select = ui.select(
-                {
-                    "off": "Off (rapide)",
-                    "low": "Low",
-                    "medium": "Medium",
-                    "high": "High",
-                    "xhigh": "XHigh",
-                },
-                value=os.getenv("LLM_REASONING", "off"),
-                label="Niveau de raisonnement",
-            ).classes("w-full")
-            web_search_switch = ui.switch(
-                "Recherche web (etat de l'art)", value=False
-            )
-            web_backend = ui.select(
-                {
-                    "ddg": "DuckDuckGo (sans cle)",
-                    "searxng": "SearXNG (auto-heberge)",
-                    "tavily": "Tavily (cle cloud)",
-                },
-                value=os.getenv("WEB_SEARCH_BACKEND", "ddg"),
-                label="Backend de recherche",
-            ).classes("w-full")
-            searxng_url_input = ui.input(
-                "URL SearXNG", value=os.getenv("SEARXNG_URL", "")
-            ).classes("w-full")
-            tavily_key_input = ui.input(
-                "Cle Tavily", value=os.getenv("TAVILY_API_KEY", ""), password=True
-            ).classes("w-full")
-            with ui.row().classes("w-full items-center"):
-                timeout_input = ui.number(
-                    "Timeout appel LLM (s)",
-                    value=float(os.getenv("LLM_TIMEOUT", "1800")),
-                    format="%.0f", min=30,
-                ).props("label-always")
-                retries_input = ui.number(
-                    "Retries", value=float(os.getenv("LLM_MAX_RETRIES", "1")),
-                    format="%.0f", min=0,
-                ).props("label-always")
-            step_context_limit_input = ui.number(
-                "Limite de contexte par etape precedente (caracteres)",
-                value=float(os.getenv("STEP_CONTEXT_LIMIT", "40000")),
-                format="%.0f", min=1000,
-            ).props("label-always").classes("w-full")
-            context_auto_switch = ui.switch(
-                "Contexte auto (LM Studio, llama.cpp, koboldcpp... sinon LOCAL_CONTEXT_TOKENS)", value=True
-            )
-
-        with ui.card().classes("w-full"):
-            ui.label("Lancement").classes("text-subtitle1")
-            project_input = ui.input("Nom du projet", value="Test_Projet").classes("w-full")
-            context_input = ui.textarea(
-                "Contexte / description du systeme", value=""
-            ).classes("w-full")
-            ui.upload(
-                on_upload=on_context_upload, auto_upload=True
-            ).props('accept=.txt,.md label="Charger un fichier de contexte"').classes("w-full")
-            run_btn = ui.button(
-                "Lancer l'analyse", icon="play_arrow", on_click=start_analysis
-            ).classes("w-full")
-            run_progress = ui.linear_progress(show_value=False).props(
-                "indeterminate instant-feedback"
-            )
-            run_progress.set_visibility(False)
+    # ------- Journal compact — visible sous tous les onglets -------
+    log = ui.log(max_lines=500).classes("w-full").style("height: 140px")
+    log.push("Onglet ⚙ Configuration : lancement, reglages, modeles, RAG, sessions.")
+    log.push("Le lancement bascule automatiquement sur l'onglet de l'etape en cours.")
 
     # Popup plein ecran de production (lecture)
     with ui.dialog() as fs_dialog:
