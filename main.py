@@ -127,6 +127,18 @@ async def sessions_command(args):
         print()
 
 
+def _apply_mode_visibility() -> None:
+    """Deploie/replie les cartes modeles selon le mode choisi (hybrid = les
+    deux, cloud = cloud seul, local = local seul)."""
+    mode = mode_radio.value
+    local_card.set_visibility(mode in ("hybrid", "local"))
+    cloud_card.set_visibility(mode in ("hybrid", "cloud"))
+
+
+def _on_mode_change(_sender=None, _value=None) -> None:
+    _apply_mode_visibility()
+
+
 async def export_xlsx_command(args):
     """Export Excel : fichier .md d'analyse OU dossier de session."""
     from export_utils import export_xlsx, markdown_tables

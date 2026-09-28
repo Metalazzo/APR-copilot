@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.38] - 2026-09-28
+
+### Ajoute — les cartes modeles se deploient selon le mode choisi
+
+- Dans l'onglet ⚙ Configuration, changer le mode **deploie automatiquement les
+  cartes concernées** :
+  - `hybrid` → Serveur local **et** Modèle cloud
+  - `cloud` → Modèle cloud seul
+  - `local` → Serveur local seul
+- État initial appliqué au build ; rappel sous le radio (« Seules les cartes
+  du mode choisi restent visibles. »)
+- Rollback : commit `655f6af`
+
 ## [1.3.37] - 2026-09-28
 
 ### Modifie — onglet « ⚙ Configuration » (gagner la hauteur verticale)

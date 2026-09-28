@@ -1173,6 +1173,7 @@ def build_page() -> None:
     global project_input, context_input, run_btn, run_progress
     global force_delivery_switch
     global tabs, sessions_container, fs_dialog, fs_md, fs_title, docs_added_md
+    global local_card, cloud_card
 
     # CSS global : infobulles lisibles sur ecran 1080p (largeur cappée)
     ui.add_head_html(
@@ -1233,8 +1234,12 @@ def build_page() -> None:
                     },
                     value=app_config.profiles.agent_profile,
                 ).props("dense")
+                mode_radio.on_value_change(_on_mode_change)
+                ui.label("Seules les cartes du mode choisi restent visibles.").classes(
+                    "text-caption text-grey"
+                )
 
-            with ui.card().classes("w-full"):
+            with ui.card().classes("w-full") as local_card:
                 ui.label("Serveur local (compatible OpenAI : LM Studio, llama.cpp, "
                          "koboldcpp, Ollama...)").classes("text-subtitle1")
                 local_base_url = ui.input(
@@ -1264,7 +1269,7 @@ def build_page() -> None:
                         "• Trop haut → moins d'injections RAG"
                     )
 
-            with ui.card().classes("w-full"):
+            with ui.card().classes("w-full") as cloud_card:
                 ui.label("Modele cloud").classes("text-subtitle1")
                 cloud_model = ui.input(
                     "Modele", value=app_config.profiles.cloud.model
@@ -1470,6 +1475,21 @@ def build_page() -> None:
         "Outil local mono-utilisateur. Les livrables sont ecrits dans "
         f"{app_config.output_dir}. Interface precedente : python gui_classic.py"
     ).classes("text-caption text-grey")
+
+    # Etat initial des cartes modeles selon le mode par defaut
+    _apply_mode_visibility()
+
+
+def _apply_mode_visibility() -> None:
+    """Deploie/replie les cartes modeles selon le mode choisi (hybrid = les
+    deux, cloud = cloud seul, local = local seul)."""
+    mode = mode_radio.value
+    local_card.set_visibility(mode in ("hybrid", "local"))
+    cloud_card.set_visibility(mode in ("hybrid", "cloud"))
+
+
+def _on_mode_change(_sender=None, _value=None) -> None:
+    _apply_mode_visibility()
 
 
 def _show_fullscreen(step_id: str) -> None:
