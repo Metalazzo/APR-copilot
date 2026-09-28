@@ -11,3 +11,5 @@ venv/
 markdown-export*.html
 test/batterie/
 test/references/*.pdf
+models.7z
+*.7z

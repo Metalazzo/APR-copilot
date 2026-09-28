@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.3.32] - 2026-09-28
+
+### Corrige — injection d'un fichier de contexte (GUI) : API NiceGUI 3.x
+
+- Erreur constatee : « Lecture du fichier impossible :
+  'UploadEventArguments' object has no attribute 'content' » — NiceGUI 3.16
+  a remplace `e.content` (FileIO synchrone) par **`e.file`** (objet `FileUpload`
+  avec lectures **asynchrones**)
+- Handler `on_context_upload` : async, `raw = await e.file.read()` +
+  `decode('utf-8', errors='replace')` (decode tolerant conserve), nom depuis
+  `e.file.name`
+- `tests/test_upload_contexte.py` : lecture async → champ contexte rempli ;
+  evenement sans `e.file` → message d'erreur propre (pas de crash)
+- Interface classique (gui_classic.py, archive figee) : NON corrige —
+  utilisez la GUI par onglets pour l'upload de contexte
+- Rollback : commit `832d795`
+
 ## [1.3.31] - 2026-09-21
 
 ### Ajoute — cadre methodologique des barrieres (nature, referentiels, effet)

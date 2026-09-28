@@ -874,14 +874,18 @@ async def show_stats():
     ui.notify(info, type="info")
 
 
-def on_context_upload(e):
+async def on_context_upload(e):
+    """NiceGUI 3.x : UploadEventArguments.file (FileUpload) avec lectures
+    asynchrones — l'ancienne API e.content.read() a disparu (v1.3.32)."""
     try:
-        text = e.content.read().decode("utf-8", errors="replace")
+        raw = await e.file.read()
+        text = raw.decode("utf-8", errors="replace")
+        name = e.file.name
     except Exception as exc:
         ui.notify(f"Lecture du fichier impossible : {exc}", type="negative")
         return
     context_input.value = text
-    ui.notify(f'Fichier "{e.name}" charge ({len(text)} caracteres).', type="positive")
+    ui.notify(f'Fichier "{name}" chargé ({len(text)} caractères).', type="positive")
 
 
 # ---------------------------------------------------------------------------
