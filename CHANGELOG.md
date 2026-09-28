@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.3.42] - 2026-09-29
+
+### Corrige — avis du relecteur tronque a « 1. Statut global »
+
+Constat : le relecteur ecrit son avis en structure numerotee
+(`1. **Statut global**` puis le contenu sur la ligne suivante) — l'extraction
+s'arretait au label (`1. Statut global`) sans ramasser le contenu.
+
+- `_extract_statut` : strip des prefixes de liste (`1. `, `1) `) et du label
+  `Statut global` ; si la ligne label est vide apres nettoyage, le CONTENU des
+  lignes suivantes est collecte jusqu'a la section suivante (numero, en-tete,
+  puce, marqueur « Points »)
+- `tests/test_statut_global.py` : scenario numerote ajoute
+- Rollback : commit `a6c64b5`
+
 ## [1.3.41] - 2026-09-28
 
 ### Corrige — le marqueur de section « Points » n'est plus un point

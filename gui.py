@@ -166,23 +166,36 @@ def _norm_text(s: str) -> str:
 
 
 def _extract_statut(review_text: str) -> str:
-    """L'avis global du relecteur (ligne 'Statut global …') — c'est un
-    VERDICT de contexte, pas un point qualifiable (constat v1.3.40)."""
+    """L'avis global du relecteur — VERDICT de contexte, pas un point
+    qualifiable. Gere : 'Statut global : a corriger — …' sur une ligne, et la
+    structure numerotee ('1. **Statut global**' suivi du contenu)."""
     lines = (review_text or "").splitlines()
     for i, line in enumerate(lines):
         low = line.lower()
         if "statut global" not in low and not re.match(r"^\s*\*{0,2}statut\s*:", low):
             continue
         cleaned = re.sub(r"[*_`#]+", "", line).strip()
+        cleaned = re.sub(r"^\d+[.)]\s*", "", cleaned)            # "1. "
         cleaned = re.sub(r"(?i)^statut global\s*:?\s*", "", cleaned)
         cleaned = re.sub(r"(?i)^statut\s*:?\s*", "", cleaned)
         if not cleaned:
-            # le contenu est sur la/les lignes suivantes (statut sur 2 lignes)
+            # contenu apres la ligne label : on collecte jusqu'a la section
+            # suivante (numéro, en-tete, puce, marqueur 'Points')
+            gathered = []
             for nxt in lines[i + 1:]:
-                nxt_clean = re.sub(r"[*_`#]+", "", nxt).strip()
-                if nxt_clean:
-                    cleaned = nxt_clean
+                nxt_s = nxt.strip()
+                if not nxt_s:
+                    if gathered:
+                        break
+                    continue
+                if (re.match(r"^#{1,6}\s", nxt_s) or _BULLET_RE.match(nxt_s)
+                        or re.match(r"^\d+[.)]\s+", nxt_s)
+                        or _norm_text(nxt_s) in ("points", "point")):
                     break
+                gathered.append(re.sub(r"[*_`#]+", "", nxt_s))
+                if len(" ".join(gathered)) > 180:
+                    break
+            cleaned = " ".join(gathered)
         if cleaned:
             return cleaned[:200]
     return ""

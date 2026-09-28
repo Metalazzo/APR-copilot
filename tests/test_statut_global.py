@@ -59,6 +59,22 @@ def t_avis_extrait():
     assert "phases de vie" in avis, avis
 
 
+def t_statut_numerote():
+    """Structure numerotee : '1. **Statut global**' + contenu sur la ligne
+    suivante (constat v1.3.42 — l'avis s'arretait a '1. Statut global')."""
+    review = """1. **Statut global**
+À corriger — le cadrage ne cite pas les phases de vie.
+2. **Points**
+### [P1] Phases de vie incomplètes
+- Verdict : IMPORTANT"""
+    avis = _extract_statut(review)
+    assert avis.lower().startswith("à corriger"), avis
+    assert "phases de vie" in avis, avis
+    assert "statut global" not in avis.lower(), avis
+    # le marqueur '2. Points' ne doit pas etre ramasse
+    assert "points" not in avis.lower(), avis
+
+
 def t_pas_de_statut():
     assert _extract_statut("### [P1] Un point\n- Verdict : MINEUR") == ""
 
@@ -67,6 +83,7 @@ def main():
     _run("verdict global : pas un point qualifiable", t_statut_pas_un_point)
     _run("avis du relecteur extrait comme contexte", t_avis_extrait)
     _run("absence d'avis -> chaine vide", t_pas_de_statut)
+    _run("statut numerote (1. **Statut global**) -> contenu ramasse", t_statut_numerote)
     if not FAILURES:
         print("\nTEST STATUT GLOBAL : TOUT PASSE")
     else:
