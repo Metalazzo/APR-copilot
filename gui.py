@@ -329,18 +329,18 @@ def _anchor_flags(pt: dict, production_text: str | None) -> tuple[bool, bool]:
     return no_anchor, extrait_missing
 
 
-def _anchor_labels(pt: dict, production_text: str | None) -> list[tuple[str, str]]:
-    """Libelles de badges d'ancrage : [(libelle, couleur)]."""
+def _anchor_labels(pt: dict, production_text: str | None) -> list[tuple[str, str, str]]:
+    """(label court, couleur, tooltip) — l'explication complete passe au survol."""
     no_anchor, extrait_missing = _anchor_flags(pt, production_text)
     labels = []
     if no_anchor:
-        # Bug M8 : si le point vient du repli heuristique (pas de bloc
-        # canonique), l'absence d'ancrage vient du FORMAT, pas du relecteur
-        kind = ("point non structuré (le relecteur n'a pas suivi le format)"
-                if not pt.get("id") else "ni localisation ni extrait — raté du relecteur")
-        labels.append((f"⚠ non ancré ({kind})", "brown"))
+        kind = ("point non structuré : le relecteur n'a pas suivi le format canonique"
+                if not pt.get("id")
+                else "ni localisation ni extrait — l'ancrage incombe au relecteur")
+        labels.append(("⚠ non ancré", "brown", kind))
     elif extrait_missing:
-        labels.append(("⚠ extrait introuvable dans la production — juger avec prudence", "deep-orange"))
+        labels.append(("⚠ extrait introuvable", "deep-orange",
+                       "l'extrait cité ne figure pas dans la production affichée — juger avec prudence"))
     return labels
 
 
@@ -482,19 +482,23 @@ def _render_step_points(step_id: str, interactive: bool) -> None:
                                     clearable=True,
                                 ).props("dense")
                                 ui.label(prefix + title).classes("grow text-body2")
-                            for lbl, col in _anchor_labels(pt, card.get("production_text")):
+                            for lbl, col, tip in _anchor_labels(pt, card.get("production_text")):
                                 ui.label(lbl).classes("text-caption").style(
                                     f"color: #b26a00; border-left: 3px solid {col}; padding-left: 6px"
-                                )
+                                ).tooltip(tip)
                             if pt.get("extrait"):
                                 ui.label("Extrait :").classes("text-caption text-grey")
                                 ui.code(pt["extrait"].strip()).classes("w-full").style(
                                     "white-space: pre-wrap; font-size: 12px; padding: 4px 8px"
                                 )
                             if pt.get("justification"):
-                                ui.label(
-                                    f"Justification : {pt['justification'][:220]}"
-                                ).classes("text-caption")
+                                ui.label(f"Justification : {pt['justification']}").classes(
+                                    "text-caption"
+                                ).style("white-space: pre-line")
+                            if pt.get("correction"):
+                                ui.label(f"Correction proposée : {pt['correction']}").classes(
+                                    "text-caption text-blue-grey"
+                                ).style("white-space: pre-line")
                             if (pt.get("pour_humain") or "").strip().lower().startswith("oui"):
                                 ui.label("👨 Décision humaine attendue sur ce point").classes(
                                     "text-caption text-blue"

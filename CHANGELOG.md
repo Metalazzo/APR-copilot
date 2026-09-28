@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.3.34] - 2026-09-28
+
+### Modifie — lisibilite des cartes de points de relecture
+
+- **Justification complète** (la troncature a 220 caracteres etait un artefact
+  d'affichage — le texte du relecteur est affiché en entier, retour a la ligne
+  preserve)
+- **« Correction proposée » desormais affichée** dans la carte (elle aide a
+  comprendre ce qui est attendu — elle etait collectee mais non affichée)
+- **Labels d'ancrage raccourcis** : « ⚠ non ancré » / « ⚠ extrait introuvable »
+  (l'explication complete passe au survol de la souris) — moins de « blabla »
+- Rappel : le fix du champ « Pour l'humain » (v1.3.33) s'applique au
+  PROCHAIN lancement de la GUI — les fragments bizarres de la session en
+  cours disparaitront a la relance
+- Rollback : commit `3592ba5`
+
 ## [1.3.33] - 2026-09-28
 
 ### Corrige/Ajoute — champ « Pour l'humain » + défauts cloud + check-api
