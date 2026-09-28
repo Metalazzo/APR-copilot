@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.3.35] - 2026-09-28
+
+### Ajoute — infobulles « Max tokens » (cloud et local)
+
+- Survol des deux champs « Max tokens » de la GUI → résumé des tenants et
+  aboutissants :
+  - **Cloud** : cap = plafond de facturation (rien à payer si la génération
+    s'arrête naturellement) · 8192 = troncature garantie des étapes lourdes ·
+    recommandé 65536 · 1M = boucles pathologiques facturées jusqu'au cap
+  - **Local** : le plafond réserve de la VRAM dans le budget de contexte
+    (l'auto-contexte le soustrait) · garder ~20-30 % du contexte chargé ·
+    trop bas = étapes tronquées, trop haut = moins d'injections RAG
+- Rollback : commit `1e063c0`
+
 ## [1.3.34] - 2026-09-28
 
 ### Modifie — lisibilite des cartes de points de relecture

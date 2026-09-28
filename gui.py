@@ -1350,7 +1350,13 @@ def build_page() -> None:
                 local_max_tokens = ui.number(
                     "Max tokens", value=app_config.profiles.local.max_tokens,
                     format="%.0f", min=256,
-                ).props("label-always")
+                ).props("label-always").tooltip(
+                    "Plafond de SORTIE par appel en local : il réserve de la VRAM "
+                    "dans le budget de contexte (l'auto-contexte le soustrait).\n\n"
+                    "• Gardez ~20-30 % du contexte chargé (ex. 32768 sur 131k)\n"
+                    "• Trop bas = étapes tronquées\n"
+                    "• Trop haut = moins d'injections RAG possibles"
+                )
 
         with ui.card().classes("w-full"):
             ui.label("Modele cloud").classes("text-subtitle1")
@@ -1372,7 +1378,15 @@ def build_page() -> None:
                 cloud_max_tokens = ui.number(
                     "Max tokens", value=app_config.profiles.cloud.max_tokens,
                     format="%.0f", min=256,
-                ).props("label-always")
+                ).props("label-always").tooltip(
+                    "Plafond de SORTIE par appel (cloud) — les tokens générés sont "
+                    "facturés, mais le plafond ne coûte rien si la génération "
+                    "s'arrête naturellement.\n\n"
+                    "• 8192 = TROP PETIT : vos étapes font 30-90k caractères "
+                    "(≈ 10-25k tokens) → troncature garantie\n"
+                    "• Recommandé : 65536 (≈ 210k caractères, 2× la marge)\n"
+                    "• 1M = les boucles pathologiques seront facturées jusqu'au cap"
+                )
 
         with ui.expansion("Parametres avances", icon="tune").classes("w-full"):
             function_calling_switch = ui.switch("Tool calling", value=True)
