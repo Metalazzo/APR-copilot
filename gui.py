@@ -363,19 +363,24 @@ def _parse_review_points(review_text: str, max_items: int = 100) -> list[dict]:
 def _anchor_flags(pt: dict, production_text: str | None) -> tuple[bool, bool]:
     """Verification objective de l'ancrage d'un point de relecture.
 
-    Retourne (non_ancre, extrait_introuvable) :
+    Retourne (non_ancre, extrait_non_conforme) :
     - non ancre : NI Localisation NI Extrait renseignes — le relecteur a
       deraille, pas le lecteur humain
-    - extrait introuvable : l'extrait cite ne figure pas (en normalise) dans
-      la production affichee — le relecteur a reformule/invente"""
+    - extrait non conforme : MOINS de 70 % des mots significatifs de l'extrait
+      cite figurent dans la production affichee — le relecteur a reformule en
+      profondeur ou invente (test par mots : une simple variation de formulation
+      ne declenche pas le drapeau)"""
     loc = (pt.get("localisation") or "").strip()
     ex = (pt.get("extrait") or "").strip()
     no_anchor = not (loc or ex)
     extrait_missing = False
     if ex and production_text:
-        n = _norm_text(ex)[:100]
-        if n and n not in _norm_text(production_text):
-            extrait_missing = True
+        ex_words = {w for w in re.findall(r"[a-zà-ÿ0-9]{4,}", ex.lower()) if w}
+        prod_words = {w for w in re.findall(r"[a-zà-ÿ0-9]{4,}", production_text.lower())}
+        if ex_words:
+            ratio = 1 - len(ex_words - prod_words) / len(ex_words)
+            if ratio < 0.7:
+                extrait_missing = True
     return no_anchor, extrait_missing
 
 
@@ -389,8 +394,10 @@ def _anchor_labels(pt: dict, production_text: str | None) -> list[tuple[str, str
                 else "ni localisation ni extrait — l'ancrage incombe au relecteur")
         labels.append(("⚠ non ancré", "brown", kind))
     elif extrait_missing:
-        labels.append(("⚠ extrait introuvable", "deep-orange",
-                       "l'extrait cité ne figure pas dans la production affichée — juger avec prudence"))
+        labels.append(("⚠ extrait non conforme", "deep-orange",
+                       "l'extrait cité ne figure pas tel quel dans la production "
+                       "affichée — le relecteur a probablement reformulé ou inventé : "
+                       "vérifiez le passage avant de qualifier"))
     return labels
 
 
@@ -868,6 +875,18 @@ async def on_progress(event: dict) -> None:
     elif etype == "resumed":
         log.push(f"[session] Reprise de '{event.get('session', '')}' — "
                  f"{event.get('n_steps', 0)} etape(s) validee(s) conservee(s)")
+    elif etype == "iteration_limit":
+        log.push(f"[iters] {event.get('step_id', '')} : {event.get('iteration', 0)} "
+                 f"boucle(s) deja effectuees (limite {event.get('limite', '?')}) — "
+                 "les re-relectures n'apportent souvent plus rien ; "
+                 "envisagez CONTINUER ou un autre modele")
+        _safe_notify(
+            f"Limite d'itérations atteinte sur {event.get('step_id', '')} "
+            f"({event.get('iteration', '?')} boucles) — les re-relectures "
+            "n'apportent souvent plus rien : envisagez CONTINUER ou un autre "
+            "modèle.",
+            type_="warning",
+        )
     elif etype == "done":
         log.push("=== Analyse terminee ===")
         totals = event.get("totals") or {}

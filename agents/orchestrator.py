@@ -924,6 +924,19 @@ class RiskAnalysisOrchestrator:
                 f"## FEEDBACK HUMAIN A INTEGRER (prioritaire, a suivre a la lettre)\n"
                 f"{human_feedback}\n\n"
             )
+        if previous_production and human_feedback:
+            # Regle de correction ciblee (v1.3.45) : seul le passage des points
+            # "A CORRIGER" bouge — le reste de la version validee reste mot pour
+            # mot (evite que chaque iteration re-ecrive tout et invente).
+            enriched_task += (
+                f"## REGLE DE CORRECTION CIBLEE (iteration {iteration}) — IMPERATIVE\n"
+                f"- Corrigez UNIQUEMENT les passages concernés par les points "
+                f"qualifiés « A CORRIGER » dans le feedback ci-dessus.\n"
+                f"- Tout autre passage doit rester STRICTEMENT IDENTIQUE à la "
+                f"production precedente fournie : ne reformulez pas, ne "
+                f"reorganisez pas, n'ajoutez rien.\n"
+                f"- Livrez l'etape COMPLETE avec les corrections integrees.\n\n"
+            )
         enriched_task += f"## Tache\n{step['task']}"
         return await self._ask_agent(
             self.engineer, enriched_task,
@@ -1593,6 +1606,20 @@ class RiskAnalysisOrchestrator:
 
                 if not step["checkpoint"]:
                     break  # etape finale (livraison) : pas de checkpoint humain
+
+                limite = int(os.getenv("MAX_ITERATIONS_ETAPE", "4"))
+                if iteration >= limite:
+                    # Garde-fou iterations (v1.3.45) : en local chaque boucle
+                    # coute des heures — avertir sans bloquer
+                    await self._emit({
+                        "type": "iteration_limit",
+                        "step_id": step["id"],
+                        "iteration": iteration,
+                        "limite": limite,
+                    })
+                    print(f"[iters] {step['name']} : {iteration} boucle(s) deja "
+                          f"effectuees — les re-relectures n'apportent souvent "
+                          f"plus rien ; envisagez CONTINUER ou un autre modele.")
 
                 await self._emit({"type": "checkpoint", "step_id": step["id"]})
                 suffix = f" (iteration {iteration})" if iteration else ""

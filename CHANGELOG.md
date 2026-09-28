@@ -1,5 +1,49 @@
 # Changelog
 
+## [1.3.45] - 2026-09-29
+
+### Ajoute — correction ciblée + garde-fou d'itérations par étape
+
+Constat utilisateur : chaque feedback ré-écrivait l'étape ENTIÈRE (le modèle
+reformulait tout) et la re-relecture soulevait de NOUVEAUX problèmes → spirales
+de 2-4 tours, très coûteuses en local.
+
+- **Règle de correction ciblée** (`_run_engineer_step`) : quand une étape est
+  re-générée après feedback, la tâche porte la règle IMPÉRATIVE — corrigez
+  UNIQUEMENT les passages des points « A CORRIGER », tout autre passage reste
+  STRICTEMENT IDENTIQUE à la version précédente (ne reformulez pas, ne
+  réorganisez pas, n'ajoutez rien) — l'étape complète est livrée avec les
+  corrections intégrées
+- **Re-lectures complètes conservées** (Qualité et Client relisent tout à
+  chaque itération) ; les garde-fous anti-spirale existants restent (points
+  déjà qualifiés non re-soulevés, IDs stables si le point persiste)
+- **`MAX_ITERATIONS_ETAPE`** (env, défaut 4) : au checkpoint, au-delà du
+  seuil, un avertissement explicite (journal + notification GUI) — « les
+  re-relectures n'apportent souvent plus rien ; envisagez CONTINUER ou un
+  autre modèle » — soft, pas bloquant
+- `tests/test_gel.py` (conservé) : règle de gel dans la tâche, pas de gel sur
+  la première production, iteration_limit émise
+- Rollback : commit `0816598`
+
+## [1.3.44] - 2026-09-29
+
+### Modifie — « ⚠ extrait introuvable » devient « ⚠ extrait non conforme »
+
+Constat utilisateur : le libelle etait trompeur (l'extrait etait AFFICHE en
+dessous, mais marquee « introuvable ») — en realite, le drapeau signale que
+la citation ne figure pas TELLE QUELLE dans la production (le relecteur a
+reformule).
+
+- **Libelle plus juste** : « ⚠ extrait non conforme » + tooltip « le relecteur
+  a probablement reformulé ou inventé : vérifiez le passage avant de qualifier »
+- **Verification moins fragile** : test de contenance exacte remplacé par un
+  test PAR MOTS (≥ 70 % des mots significatifs de l'extrait figures dans la
+  production → conforme) — une reformulation simple ne declenche plus le
+  drapeau, un extrait invente toujours
+- `tests/test_ancrage.py` (conservé) : verbatim, reformulation, invente,
+  tolerance mot a mot
+- Rollback : commit `bc7d737`
+
 ## [1.3.43] - 2026-09-29
 
 ### Corrige — avis du relecteur coupe a ~200 caracteres
