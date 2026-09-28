@@ -329,6 +329,10 @@ def _parse_review_points(review_text: str, max_items: int = 100) -> list[dict]:
         if not bm:
             continue
         item = re.sub(r"\*+", "", bm.group(1)).strip()
+        # un marqueur de section du modele ("- Points", "* Points *") n'est pas
+        # un point qualifiable (constat v1.3.41)
+        if _norm_text(item) in ("points", "point"):
+            continue
         # une puce qui re-cite un ID de point ("P1 Titre...") : le prefixe est
         # retire pour que la deduplication par texte normalise fonctionne
         item = re.sub(r"^\[?(P\d+)\]?\s*[-:—]?\s*", "", item)

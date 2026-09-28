@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.41] - 2026-09-28
+
+### Corrige — le marqueur de section « Points » n'est plus un point
+
+Constat utilisateur : un point qualifiable titré « Points » (en repli)
+apparaissait — c'est le MARQUEUR DE SECTION du relecteur (une ligne
+`- Points` / `* **Points** *`), pas un manque à clarifier.
+
+- Parseur : les puces dont le texte normalisé est « points »/« point » sont
+  écartées (marqueurs de section, jamais des points qualifiables)
+- Rollback : commit `f5c6235`
+
 ## [1.3.39] - 2026-09-28
 
 ### Corrige — l'avis du relecteur n'est pas un point (cadrage brouille)
