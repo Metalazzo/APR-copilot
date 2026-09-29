@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.3.46] - 2026-09-29
+
+### Modifie — README public à jour (12 releases derrière)
+
+- Passages « tiroirs » remplacés par l'**onglet ⚙ Configuration** (v1.3.37)
+- Ajout des apports récents : **correction ciblée (gel) + `MAX_ITERATIONS_ETAPE`**,
+  **avis global du relecteur en contexte** (jamais à qualifier), **ancrage
+  vérifié objectivement** (les ⚠ sont des vérifications automatiques),
+  **`python main.py check-api`** (diagnostic API en une commande)
+- Nouvelle section **« Tests (harnais offline) »** : les 9 scripts conservés de
+  `tests/` documentés (ce que chacun vérifie) — exécutables sans appel LLM
+- Mention de l'état du projet dans l'intro (v1.3.45)
+- Rollback : commit `0816598`
+
 ## [1.3.45] - 2026-09-29
 
 ### Ajoute — correction ciblée + garde-fou d'itérations par étape

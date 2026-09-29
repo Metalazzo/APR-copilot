@@ -11,6 +11,9 @@ traçable.
 > filtrage, scénarios, barrières, mise en forme), pour laisser à l'humain les
 > arbitrages, validations et enrichissements à forte valeur ajoutée.
 
+**État du projet : v1.3.45** — le [CHANGELOG](CHANGELOG.md) documente chaque
+version et son commit de rollback.
+
 ---
 
 ## Ce que ce n'est pas
@@ -38,9 +41,20 @@ Cadrage → Filtrage → Scénarios → Barrières → Livraison
 ```
 
 Un **feedback humain déclenche une re-génération + une nouvelle relecture** sur la
-même étape — vous itérez autant de fois que nécessaire. Le livrable final est
-assemblé en 5 blocs (résumé exécutif + RACI, filtrage, tableaux APR, plan de
-traitement, points ouverts) avec la **traçabilité complète des décisions**.
+même étape — vous itérez autant de fois que nécessaire. Garanties d'itération :
+
+- **Correction ciblée** : seuls les passages des points « À corriger » bougent —
+  tout le reste reste mot pour mot tel qu'accepté
+- **Re-lectures complètes** à chaque itération (Qualité et Client relisent tout)
+- L'**avis global du relecteur** s'affiche comme *contexte* (« Avis du
+  relecteur : … ») — jamais comme un point à qualifier
+- Les points déjà décidés (Sans objet / Déjà traité) ne sont **jamais re-soulevés** ;
+  un point qui persiste est ré-émis avec **le même ID** — et
+  `MAX_ITERATIONS_ETAPE` (défaut 4) avertit au-delà des 3 boucles usuelles
+
+Le livrable final est assemblé en 5 blocs (résumé exécutif + RACI, filtrage,
+tableaux APR, plan de traitement, points ouverts) avec la **traçabilité complète
+des décisions**.
 
 ## Fonctionnalités
 
@@ -58,11 +72,17 @@ traitement, points ouverts) avec la **traçabilité complète des décisions**.
   production/relecture/décision ; QUITTER = pause reprenable ; changement de
   modèle entre étapes à la reprise (`--force-delivery` pour re-générer le
   livrable seul)
+- 🎯 **Correction ciblée (itération vraie)** : un feedback ne ré-écrit que les
+  passages des points « À corriger » — le reste reste mot pour mot tel
+  qu'accepté — et `MAX_ITERATIONS_ETAPE` (défaut 4) avertit au-delà des
+  3 boucles usuelles
+- 🩺 **`python main.py check-api`** : diagnostic d'une API cloud en une
+  commande — noms de modèles valides, token, URL, verdict exact
 - 📊 **Statistiques de génération** : tokens, durées, tok/s par étape/agent,
   ETA des étapes restantes, coût estimé — exportées en `stats.md`/`stats.json`
-- 🖥️ **GUI par onglets** (NiceGUI) : une étape = un onglet, qualification inline,
-  production repliable/plein écran, tiroirs (Journal, Documents RAG, Sessions,
-  Réglages) — ajout de documents **pendant l'analyse**
+- 🖥️ **GUI par onglets** (NiceGUI) : une étape = un onglet, qualification
+  inline, production repliable/plein écran, onglet ⚙ Configuration (réglages,
+  modèles, RAG, sessions) — ajout de documents **pendant l'analyse**
 - 🔍 **Recherche web optionnelle** (DuckDuckGo / SearXNG auto-hébergé / Tavily),
   injectée comme « état de l'art NON VÉRIFIÉ » — jamais indexée dans le RAG
 - ⚡ **Gestion auto du contexte** : détection du contexte chargé de LM Studio et
@@ -82,9 +102,9 @@ python main.py ingest ./sample_docs
 python gui.py
 ```
 
-Dans la GUI (tiroir **Réglages**) : profil `local`/`cloud`/`hybrid`, modèles du
-serveur local détectés en direct (endpoint OpenAI standard), lancement. Ou en
-CLI :
+Dans l'onglet **⚙ Configuration** : profil `local`/`cloud`/`hybrid` (les
+cartes modèles se déploient selon le mode), modèles du serveur local détectés
+en direct (endpoint OpenAI standard), lancement. Ou en CLI :
 
 ```bash
 python main.py analyze \
@@ -147,6 +167,21 @@ indépendants :
   Ornith-1.5-35B-A3B, Qwen3.6-35B-A3B) divise le temps de génération à mémoire
   égale — idéal pour la Secrétaire, dont le travail est surtout de restitution
 
+## Tests (harnais offline)
+
+Tous les scripts s'exécutent **sans appel LLM** (~2-15 s chacun) — à
+re-exécuter après toute modification :
+
+| Script | Vérifie |
+|---|---|
+| `python tests/test_reprise.py` | Le state-machine de reprise : étapes validées sautées, feedback « à corriger » re-généré, QUITTER, session complète, `LIVRAISON_FORCE` |
+| `python tests/test_gel.py` | La règle de correction ciblée (gel) + le garde-fou `MAX_ITERATIONS_ETAPE` |
+| `python tests/test_auto_contexte.py` | La détection multi-moteurs du contexte (LM Studio, llama.cpp, koboldcpp) + `LOCAL_CONTEXT_TOKENS` |
+| `python tests/test_ancrage.py` | La vérification objective des extraits cités (verbatim, reformulation, inventé) |
+| `python tests/test_pour_humain.py` · `test_statut_global.py` | Le filtrage des lignes de structure égarées (champ « Pour l'humain », verdicts globaux) |
+| `python tests/test_export_xlsx.py` · `test_upload_contexte.py` | L'export Excel et l'upload de contexte (API NiceGUI 3.x) |
+| `python tests/eval_rag.py [label]` | La qualité du RAG (recall@1/@3/@8, MRR) sur un jeu de requêtes métier — baseline vs post-changements |
+
 ## Configuration
 
 Variables d'environnement (ou champs de la GUI) — table complète dans
@@ -205,7 +240,7 @@ conserver une info web : copiez la page en local puis ingérez-la via la GUI.
 | `python main.py sessions` | Lister les sessions + commande de reprise prête à copier |
 | `--resume <dossier>` | Reprendre : étapes validées conservées, suite sur le modèle actuel |
 | `--force-delivery` | Re-générer la LIVRAISON seule (livrable tronqué) |
-| `LIVRAISON_FORCE=true` | Idem en GUI (switch dans le tiroir Sessions) |
+| `LIVRAISON_FORCE=true` | Idem en GUI (switch dans l'onglet ⚙ Configuration) |
 | `CLOUD_PRICE_INPUT/OUTPUT` | Prix €/M tokens (profil cloud) → coût estimé dans les stats |
 | Si un bloc est coupé par le plafond de génération | **Continuation automatique** jusqu'à complétion + vérification de complétude du livrable |
 
